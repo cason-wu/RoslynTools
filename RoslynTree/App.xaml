@@ -1,0 +1,9 @@
+﻿<Application x:Class="RoslynTree.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:RoslynTree.Converters">
+    <Application.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <conv:ImageMonikerToImageSourceConverter x:Key="ImageMonikerToImageSourceConverter"/>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,59 @@
+﻿<Window x:Class="RoslynTree.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:views="clr-namespace:RoslynTree.Views"
+        xmlns:vm="clr-namespace:RoslynTree.ViewModels"
+        mc:Ignorable="d"
+        Title="{Binding WindowTitle}"
+        Height="700" Width="1200"
+        MinHeight="480" MinWidth="800">
+
+    <DockPanel>
+        <!-- ── Top toolbar ──────────────────────────────────────────── -->
+        <ToolBar DockPanel.Dock="Top" ToolBarTray.IsLocked="True" Padding="2">
+            <Button Content="📂 Open Project"
+                    Command="{Binding OpenProjectCommand}"
+                    Padding="10,4" FontSize="12"/>
+            <Separator/>
+            <ProgressBar Width="120" Height="14" IsIndeterminate="True"
+                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"/>
+            <TextBlock Margin="8,0" VerticalAlignment="Center"
+                       Text="{Binding StatusMessage}" FontSize="11"
+                       Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+        </ToolBar>
+
+        <!-- ── Main content: browser | tab area ────────────────────── -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" MinWidth="160"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="400"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Project browser -->
+            <views:ProjectBrowserView Grid.Column="0" DataContext="{Binding}"/>
+
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1" Width="4"
+                          HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          Background="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"/>
+
+            <!-- Tab control for analysis views -->
+            <TabControl Grid.Column="2" BorderThickness="0">
+
+                <!-- Call Tree -->
+                <TabItem Header="Call Tree">
+                    <views:CallTreeView DataContext="{Binding CallTreeVM}"/>
+                </TabItem>
+
+                <!-- References -->
+                <TabItem Header="🔗 References">
+                    <views:ReferenceTreeView DataContext="{Binding ReferenceTreeVM}"/>
+                </TabItem>
+
+            </TabControl>
+        </Grid>
+    </DockPanel>
+</Window>
