@@ -20,16 +20,7 @@ public sealed partial class ReferenceTreeNodeViewModel : SymbolTreeNodeViewModel
     /// Formatted context where this reference lives: "Namespace.ClassName.Method(params)".
     /// Empty for root and file-group nodes.
     /// </summary>
-    public string ContainingContext
-    {
-        get
-        {
-            if (_refModel.IsFileGroup) return string.Empty;
-            var parts = new[] { _refModel.ContainingNamespace, _refModel.ContainingTypeName, _refModel.ContainingSymbol }
-                .Where(s => !string.IsNullOrEmpty(s));
-            return string.Join(".", parts);
-        }
-    }
+    public string ContainingContext => _refModel.ContainingContext;
 
     public ReferenceTreeNodeViewModel(
         ReferenceTreeNode model,

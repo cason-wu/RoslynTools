@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using RoslynLib.Infrastructure;
 
 namespace RoslynLib.Domain.Models;
 
@@ -11,14 +12,20 @@ public sealed class ProjectNode
     private readonly Lazy<SymbolNodeKind> _kind;
     private readonly Lazy<string> _namespace;
     private readonly Lazy<string> _sourceFileName;
+    private readonly Lazy<string> _displayName;
+    private readonly Lazy<IReadOnlyList<ProjectMemberNode>> _members;
+    private readonly Lazy<string> _tipText;
 
     public ProjectNode(INamedTypeSymbol symbol)
     {
         Symbol = symbol ?? throw new ArgumentNullException(nameof(symbol));
         _fullName = new Lazy<string>(() => Symbol.ToDisplayString());
-        _kind = new Lazy<SymbolNodeKind>(() => MapTypeKind(Symbol.TypeKind));
+        _kind = new Lazy<SymbolNodeKind>(() => RoslynSymbolHelper.GetKind(Symbol.TypeKind));
         _namespace = new Lazy<string>(() => Symbol.ContainingNamespace?.ToDisplayString() ?? string.Empty);
         _sourceFileName = new Lazy<string>(ResolveSourceFileName);
+        _displayName = new Lazy<string>(() => RoslynSymbolHelper.BuildTypeDisplayName(Symbol));
+        _members = new Lazy<IReadOnlyList<ProjectMemberNode>>(BuildMembers);
+        _tipText = new Lazy<string>(BuildTipText);
     }
 
     public INamedTypeSymbol Symbol { get; }
@@ -27,6 +34,9 @@ public sealed class ProjectNode
     public SymbolNodeKind Kind => _kind.Value;
     public string Namespace => _namespace.Value;
     public string SourceFileName => _sourceFileName.Value;
+    public string DisplayName => _displayName.Value;
+    public IReadOnlyList<ProjectMemberNode> Members => _members.Value;
+    public string TipText => _tipText.Value;
 
     private string ResolveSourceFileName()
     {
@@ -38,13 +48,20 @@ public sealed class ProjectNode
             .FirstOrDefault() ?? string.Empty;
     }
 
-    private static SymbolNodeKind MapTypeKind(TypeKind typeKind) => typeKind switch
+    private IReadOnlyList<ProjectMemberNode> BuildMembers()
     {
-        TypeKind.Class => SymbolNodeKind.Class,
-        TypeKind.Interface => SymbolNodeKind.Interface,
-        TypeKind.Struct => SymbolNodeKind.Struct,
-        TypeKind.Enum => SymbolNodeKind.Enum,
-        TypeKind.Delegate => SymbolNodeKind.Delegate,
-        _ => SymbolNodeKind.Unknown,
-    };
+        return Symbol.GetMembers()
+            .Where(static member => !member.IsImplicitlyDeclared)
+            .Select(static member => new ProjectMemberNode(member))
+            .ToList()
+            .AsReadOnly();
+    }
+
+    private string BuildTipText()
+    {
+        if (string.IsNullOrWhiteSpace(SourceFileName))
+            return FullName;
+
+        return $"{FullName}{Environment.NewLine}Source: {SourceFileName}";
+    }
 }

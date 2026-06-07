@@ -99,17 +99,25 @@ public sealed class RoslynSymbolAnalysisService
     private static CallTreeNode CreateCallTreeNode(IMethodSymbol method, bool isCallee)
     {
         var location = method.Locations.FirstOrDefault();
+        var filePath = location?.SourceTree?.FilePath ?? string.Empty;
+        var lineNumber = location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0;
+        var sourceDisplay = RoslynSymbolHelper.BuildSourceText(filePath, lineNumber);
+        var methodDisplayName = RoslynSymbolHelper.BuildMemberDisplayName(method);
 
         return new CallTreeNode
         {
             MethodSymbol = method,
             Name = method.Name,
             FullName = method.ToDisplayString(),
-            Kind = SymbolNodeKind.Method,
+            Kind = RoslynSymbolHelper.GetKind(method),
             ContainingType = method.ContainingType?.ToDisplayString() ?? string.Empty,
-            FilePath = location?.SourceTree?.FilePath ?? string.Empty,
-            LineNumber = location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0,
+            FilePath = filePath,
+            LineNumber = lineNumber,
             IsCallee = isCallee,
+            SourceDisplay = sourceDisplay,
+            DisplayName = string.IsNullOrWhiteSpace(sourceDisplay)
+                ? methodDisplayName
+                : $"{methodDisplayName} - {sourceDisplay}",
         };
     }
 
@@ -150,12 +158,12 @@ public sealed class RoslynSymbolAnalysisService
 
         var root = new ReferenceTreeNode
         {
-            Name = FormatSymbolDisplayName(symbol),
+            Name = RoslynSymbolHelper.FormatSymbolDisplayName(symbol),
             FullName = symbol.ToDisplayString(),
-            Kind = MapSymbolKind(symbol),
+            Kind = RoslynSymbolHelper.GetKind(symbol),
             TargetSymbol = symbol,
             IsChildrenLoaded = true,
-            ContainingNamespace = GetContainingNamespaceName(symbol),
+            ContainingNamespace = RoslynSymbolHelper.GetContainingNamespaceName(symbol),
             ContainingTypeName = symbol.ContainingType?.Name ?? string.Empty,
         };
 
@@ -245,9 +253,9 @@ public sealed class RoslynSymbolAnalysisService
                 {
                     var enclosingSymbol = semanticModel.GetEnclosingSymbol(
                         location.Location.SourceSpan.Start, cancellationToken);
-                    containingNs = GetContainingNamespaceName(enclosingSymbol);
+                    containingNs = RoslynSymbolHelper.GetContainingNamespaceName(enclosingSymbol);
                     containingTypeName = enclosingSymbol?.ContainingType?.Name ?? string.Empty;
-                    containingSymbolDisplay = FormatSymbolDisplayName(enclosingSymbol);
+                    containingSymbolDisplay = RoslynSymbolHelper.FormatSymbolDisplayName(enclosingSymbol);
                 }
 
                 fileGroupNode.Children.Add(new ReferenceTreeNode
@@ -263,6 +271,7 @@ public sealed class RoslynSymbolAnalysisService
                     ContainingSymbol = containingSymbolDisplay,
                     ContainingNamespace = containingNs,
                     ContainingTypeName = containingTypeName,
+                    ContainingContext = RoslynSymbolHelper.BuildContainingContext(containingNs, containingTypeName, containingSymbolDisplay),
                     IsChildrenLoaded = true,
                 });
             }
@@ -273,51 +282,4 @@ public sealed class RoslynSymbolAnalysisService
 
         return fileGroupNode.Children.OfType<ReferenceTreeNode>().ToList().AsReadOnly();
     }
-
-    // ──────────────────────────── Display helpers ─────────────────────────────
-
-    private static string FormatSymbolDisplayName(ISymbol? symbol)
-    {
-        if (symbol is null) return string.Empty;
-        if (symbol is IMethodSymbol method)
-        {
-            var paramTypes = method.Parameters.Select(
-                p => p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
-            var name = method.MethodKind == MethodKind.Constructor
-                ? method.ContainingType?.Name ?? method.Name
-                : method.Name;
-            return $"{name}({string.Join(", ", paramTypes)})";
-        }
-        return symbol.Name;
-    }
-
-    private static string GetContainingNamespaceName(ISymbol? symbol)
-    {
-        var ns = symbol?.ContainingNamespace;
-        if (ns is null || ns.IsGlobalNamespace)
-            return string.Empty;
-        return ns.ToDisplayString();
-    }
-
-    private static SymbolNodeKind MapSymbolKind(ISymbol symbol) => symbol switch
-    {
-        INamespaceSymbol => SymbolNodeKind.Namespace,
-        INamedTypeSymbol t => t.TypeKind switch
-        {
-            TypeKind.Class => SymbolNodeKind.Class,
-            TypeKind.Interface => SymbolNodeKind.Interface,
-            TypeKind.Struct => SymbolNodeKind.Struct,
-            TypeKind.Enum => SymbolNodeKind.Enum,
-            TypeKind.Delegate => SymbolNodeKind.Delegate,
-            _ => SymbolNodeKind.Unknown,
-        },
-        IMethodSymbol { MethodKind: MethodKind.Constructor } => SymbolNodeKind.Constructor,
-        IMethodSymbol => SymbolNodeKind.Method,
-        IPropertySymbol => SymbolNodeKind.Property,
-        IFieldSymbol => SymbolNodeKind.Field,
-        IEventSymbol => SymbolNodeKind.Event,
-        IParameterSymbol => SymbolNodeKind.Parameter,
-        ILocalSymbol => SymbolNodeKind.LocalVariable,
-        _ => SymbolNodeKind.Unknown,
-    };
 }

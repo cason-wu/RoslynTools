@@ -24,6 +24,7 @@ public partial class App : System.Windows.Application
         var services = new ServiceCollection();
 
         // Infrastructure
+        services.AddSingleton<RoslynWorkspaceLoader>();
         services.AddSingleton<MSBuildProjectLoader>();
         services.AddSingleton<RoslynSymbolAnalysisService>();
 

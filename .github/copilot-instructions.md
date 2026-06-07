@@ -2,7 +2,7 @@
 
 ## Solution Structure
 
-- RoslynLib 是專案的核心庫，負責封裝 Roslyn API 的功能，提供服務和 ViewModel 給 Presentation Layer 使用。
+- RoslynLib 是專案的核心庫，負責封裝 Roslyn API 的功能，提供服務和 Read Model 給 Presentation Layer 叫用。
 - RoslynLib.Tests 是 RoslynLib 的單元測試專案，確保核心功能的正確性。
 
 Presentation Layer：

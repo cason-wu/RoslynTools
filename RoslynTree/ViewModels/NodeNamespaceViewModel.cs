@@ -3,7 +3,6 @@ using Microsoft.VisualStudio.Imaging.Interop;
 using System.Collections.ObjectModel;
 using RoslynTree.Infrastructure;
 using RoslynLib.Domain.Models;
-using RoslynLib.Infrastructure;
 
 namespace RoslynTree.ViewModels;
 
@@ -15,9 +14,16 @@ public partial class NodeNamespaceViewModel : ObservableObject
     [ObservableProperty]
     private bool _isExpanded;
 
-    public string Name { get; }
+    public ProjectNamespaceNode Node { get; }
+    public string Name => Node.Name;
     public ImageMoniker Icon => VisualStudioSymbolIconMap.GetIcon(SymbolNodeKind.Namespace);
     public ObservableCollection<NodeTypeViewModel> Types { get; } = [];
 
-    public NodeNamespaceViewModel(string name) => Name = name;
+    public NodeNamespaceViewModel(ProjectNamespaceNode node)
+    {
+        Node = node;
+
+        foreach (var type in node.Types)
+            Types.Add(new NodeTypeViewModel(type));
+    }
 }

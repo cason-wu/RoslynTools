@@ -25,4 +25,5 @@ public sealed class ReferenceTreeNode : RoslynTreeNode
     public string ContainingSymbol { get; init; } = string.Empty;
     public string ContainingNamespace { get; init; } = string.Empty;
     public string ContainingTypeName { get; init; } = string.Empty;
+    public string ContainingContext { get; init; } = string.Empty;
 }

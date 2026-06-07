@@ -11,6 +11,7 @@ namespace RoslynTree.ViewModels;
 public partial class MainViewModel : ObservableObject
 {
     private readonly MSBuildProjectLoader _projectLoader;
+    private LoadedProject? _loadedProject;
 
     // Current loaded project context
     private Project? _currentProject;
@@ -70,16 +71,19 @@ public partial class MainViewModel : ObservableObject
     {
         IsBusy = true;
         StatusMessage = $"Loading {System.IO.Path.GetFileName(path)}…";
-        NamespaceNodes.Clear();
 
         try
         {
             var loaded = await _projectLoader.LoadProjectAsync(path, cancellationToken).ConfigureAwait(true);
 
+            _loadedProject?.Dispose();
+            _loadedProject = loaded;
+
             _currentProject = loaded.Project;
             CurrentProjectRoot = loaded.ProjectRoot;
 
-            PopulateBrowser(loaded.Nodes);
+            NamespaceNodes = new ObservableCollection<NodeNamespaceViewModel>(
+                loaded.NamespaceNodes.Select(static node => new NodeNamespaceViewModel(node)));
             WindowTitle = $"RoslynTree — {System.IO.Path.GetFileName(path)}";
             StatusMessage = $"Loaded {loaded.Nodes.Count} type(s).";
         }
@@ -98,25 +102,6 @@ public partial class MainViewModel : ObservableObject
     }
 
     private bool CanOpen() => !IsBusy;
-
-    // ──────────────────────────────────────── Browser ─────────────────────────
-
-    private void PopulateBrowser(IReadOnlyList<ProjectNode> nodes)
-    {
-        var byNamespace = nodes
-            .GroupBy(s => string.IsNullOrEmpty(s.Namespace) ? "<global>" : s.Namespace)
-            .OrderBy(g => g.Key);
-
-        foreach (var nsGroup in byNamespace)
-        {
-            var nsNode = new NodeNamespaceViewModel(nsGroup.Key);
-            
-            foreach (var entry in nsGroup.OrderBy(e => e.Name).ThenBy(e => e.FullName))
-                nsNode.Types.Add(new NodeTypeViewModel(entry));
-            
-            NamespaceNodes.Add(nsNode);
-        }
-    }
 
     // Invoked from View when user clicks a symbol entry
     [RelayCommand]

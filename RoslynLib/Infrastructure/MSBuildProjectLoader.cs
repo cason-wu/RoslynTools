@@ -1,45 +1,47 @@
-using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.MSBuild;
 using RoslynLib.Domain.Models;
 
 namespace RoslynLib.Infrastructure;
 
 public sealed class MSBuildProjectLoader
 {
-    private static readonly object _registrationLock = new();
-    private static bool _msbuildRegistered;
+    private readonly RoslynWorkspaceLoader _workspaceLoader;
 
-    private static void EnsureMSBuildRegistered()
+    public MSBuildProjectLoader(RoslynWorkspaceLoader workspaceLoader)
     {
-        lock (_registrationLock)
-        {
-            if (!_msbuildRegistered)
-            {
-                MSBuildLocator.RegisterDefaults();
-                _msbuildRegistered = true;
-            }
-        }
+        _workspaceLoader = workspaceLoader ?? throw new ArgumentNullException(nameof(workspaceLoader));
     }
 
     public async Task<LoadedProject> LoadProjectAsync(
         string projectPath,
         CancellationToken cancellationToken = default)
     {
-        EnsureMSBuildRegistered();
+        var workspaceTarget = await _workspaceLoader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
 
-        using var workspace = MSBuildWorkspace.Create();
-        var project = await workspace.OpenProjectAsync(projectPath, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-        
-        return await extractSymbolsAsync(
-                project,
-                cancellationToken)
-            .ConfigureAwait(false);
+        if (workspaceTarget.PrimaryProject is null)
+        {
+            workspaceTarget.Dispose();
+            throw new InvalidOperationException($"Target '{projectPath}' does not resolve to a project.");
+        }
+
+        try
+        {
+            return await extractSymbolsWithWorkspaceTargetAsync(
+                    workspaceTarget.PrimaryProject,
+                    workspaceTarget,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            workspaceTarget.Dispose();
+            throw;
+        }
     }
 
-    private static async Task<LoadedProject> extractSymbolsAsync(
+    private static async Task<LoadedProject> extractSymbolsWithWorkspaceTargetAsync(
         Project project,
+        LoadedWorkspaceTarget? workspaceTarget,
         CancellationToken cancellationToken)
     {
         var nodes = new List<ProjectNode>();
@@ -51,8 +53,13 @@ public sealed class MSBuildProjectLoader
 
         collectNamespaceNodes( compilation.GlobalNamespace, compilation.Assembly, nodes);
 
-        return new LoadedProject(project, nodes.AsReadOnly());
+        return new LoadedProject(project, nodes.AsReadOnly(), workspaceTarget: workspaceTarget);
     }
+
+    private static Task<LoadedProject> extractSymbolsAsync(
+        Project project,
+        CancellationToken cancellationToken)
+        => extractSymbolsWithWorkspaceTargetAsync(project, null, cancellationToken);
 
     private static void collectNamespaceNodes(
         INamespaceSymbol ns,

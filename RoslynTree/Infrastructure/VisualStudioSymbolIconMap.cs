@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.Imaging;
 using Microsoft.VisualStudio.Imaging.Interop;
 using RoslynLib.Domain.Models;
+using RoslynLib.Infrastructure;
 
 namespace RoslynTree.Infrastructure;
 
@@ -43,27 +44,8 @@ public static class VisualStudioSymbolIconMap
         _                            => KnownMonikers.QuestionMark,
     };
 
-    public static SymbolNodeKind GetKind(ISymbol symbol) => symbol switch
-    {
-        INamespaceSymbol => SymbolNodeKind.Namespace,
-        INamedTypeSymbol t => t.TypeKind switch
-        {
-            TypeKind.Class => SymbolNodeKind.Class,
-            TypeKind.Interface => SymbolNodeKind.Interface,
-            TypeKind.Struct => SymbolNodeKind.Struct,
-            TypeKind.Enum => SymbolNodeKind.Enum,
-            TypeKind.Delegate => SymbolNodeKind.Delegate,
-            _ => SymbolNodeKind.Unknown,
-        },
-        IMethodSymbol { MethodKind: MethodKind.Constructor } => SymbolNodeKind.Constructor,
-        IMethodSymbol => SymbolNodeKind.Method,
-        IPropertySymbol => SymbolNodeKind.Property,
-        IFieldSymbol => SymbolNodeKind.Field,
-        IEventSymbol => SymbolNodeKind.Event,
-        IParameterSymbol => SymbolNodeKind.Parameter,
-        ILocalSymbol => SymbolNodeKind.LocalVariable,
-        _ => SymbolNodeKind.Unknown,
-    };
+    public static SymbolNodeKind GetKind(ISymbol symbol)
+        => RoslynSymbolHelper.GetKind(symbol);
 
     public static ImageMoniker GetIcon(SymbolNodeKind kind, Microsoft.CodeAnalysis.Accessibility accessibility)
     {
