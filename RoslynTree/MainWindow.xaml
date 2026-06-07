@@ -13,7 +13,7 @@
     <DockPanel>
         <!-- ── Top toolbar ──────────────────────────────────────────── -->
         <ToolBar DockPanel.Dock="Top" ToolBarTray.IsLocked="True" Padding="2">
-            <Button Content="📂 Open Project"
+            <Button Content="📂 Open Solution / Project"
                     Command="{Binding OpenProjectCommand}"
                     Padding="10,4" FontSize="12"/>
             <Separator/>

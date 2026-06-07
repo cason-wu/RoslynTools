@@ -1,31 +1,69 @@
 # roslyn-cli
 
-> 以 [Roslyn](https://github.com/dotnet/roslyn) 為核心的 .NET 程式碼分析 CLI 工具，
-> 支援 Symbol 查詢、參考追蹤、相依分析，並可作為 **MCP Server** 供 AI 直接呼叫。
+> 以 [Roslyn](https://github.com/dotnet/roslyn) 為核心的 .NET 程式碼分析 CLI 工具。  
+> `roslyn-cli` 專注於 **一次性、stateless** 的命令列查詢；若需要 **stateful MCP stdio server**，請改用 `RoslynMcp` / `roslyn-mcp`。
 
 ---
 
 ## 功能特色
 
-- 🔍 **Find References** — 找出 method / class / interface 的所有呼叫者與使用位置
-- 🗺️ **Dependency Graph** — 分析 project 間與 namespace 間的相依關係，偵測循環相依
-- 🏷️ **Symbol Info** — 查詢任意 Symbol 的完整 metadata（存取修飾詞、繼承、成員等）
-- 🧹 **Dead Code 偵測** — 找出未使用的成員、高複雜度方法、過時 API 使用
-- 📋 **Diagnostics** — 列出編譯錯誤、警告與 Roslyn Analyzer 結果
-- 🤖 **MCP Server 模式** — 以 `stdio` transport 啟動，讓 AI Agent 直接呼叫各項功能
+- 🔍 **Reference queries** — callers / usages / implementations / overrides
+- 🧭 **Dependency analysis** — project graph / cycles / NuGet / namespace dependencies
+- 🏷️ **Symbol inspection** — info / search / list / hierarchy
+- 🧹 **Dead code analysis** — unused / complexity / obsolete usages
+- 📋 **Diagnostics** — compiler errors / warnings / analyzer diagnostics
+- 🧩 **AI-friendly output** — `--output mcp` 會輸出 MCP tool result 風格的 JSON，但**不會啟動 MCP server**
 
 ---
 
-## 安裝
+## 系統需求
 
-```bash
-dotnet tool install -g roslyn-cli
+- .NET 10 SDK
+- 分析目標所需的 SDK / workload 已安裝於本機
+- 若使用 `.sln` / `.slnx` / `.csproj`，需可由 `MSBuildWorkspace` 正常開啟
+
+---
+
+## 支援的 target 類型
+
+- `.sln`
+- `.slnx`
+- `.csproj`
+- `.vbproj`
+- `.fsproj`
+- `.cs`
+
+---
+
+## 使用方式
+
+CLI 目前同時接受兩種等價寫法：
+
+```text
+roslyn-cli <group> <command> <target> [options]
+roslyn-cli <target> <group> <command> [options]
 ```
 
-**系統需求**
+### Help
 
-- .NET SDK 7 / 8 / 9
-- 分析目標的 SDK 版本需已安裝於本機
+```bash
+roslyn-cli --help
+roslyn-cli -h
+roslyn-cli help
+```
+
+### 常用選項
+
+| 選項 | 說明 |
+|---|---|
+| `--output <format>` | `json` / `text` / `mcp`，預設 `json` |
+| `--symbol <name>` | Symbol 名稱或 fully qualified name |
+| `--filter <kind>` | `class` / `method` / `property` / `event` / `field` / `interface` / `struct` / `enum` / `delegate` / `namespace` |
+| `--visibility <level>` | `public` / `internal` / `private` / `all`，預設 `all` |
+| `--exclude <pattern>` | 排除 glob-like 路徑，可重複使用 |
+| `--file <path>` | 指定檔案，搭配 `--line` 以位置定位 symbol |
+| `--line <number>` | 指定 1-based 行號，搭配 `--file` 使用 |
+| `--threshold <number>` | `dead complexity` 門檻，預設 `10` |
 
 ---
 
@@ -35,330 +73,111 @@ dotnet tool install -g roslyn-cli
 # 找出誰呼叫了某個 method
 roslyn-cli refs callers MyApp.sln --symbol "OrderService.CalculateTotal"
 
+# 另一種等價寫法（target-first）
+roslyn-cli MyApp.sln refs callers --symbol "OrderService.CalculateTotal"
+
 # 找出 interface 的所有實作
-roslyn-cli refs impls MyApp.sln --symbol "IUserRepository"
+roslyn-cli refs impls MyApp.slnx --symbol "IUserRepository"
 
-# 輸出 project 相依圖（JSON）
+# 輸出 project dependency graph
 roslyn-cli deps graph MyApp.sln --output json
 
-# 找出所有未使用的 public method
+# 搜尋所有 *Service 類型
+roslyn-cli sym search MyApp.sln --symbol "*Service" --filter class --output text
+
+# 找出未使用 public method
 roslyn-cli dead unused MyApp.sln --filter method --visibility public
 
-# 以 MCP Server 模式啟動
-roslyn-cli --mcp-stdio MyApp.sln
-```
-
----
-
-## 指令架構
-
-```
-roslyn-cli <target> <command> <subcommand> [options]
-
-roslyn-cli
-├── refs      # 參考關係查詢
-│   ├── callers    找出所有呼叫指定 Symbol 的地方
-│   ├── usages     找出 Symbol 的所有使用位置
-│   ├── impls      找出 interface / abstract class 的所有實作
-│   └── overrides  找出所有 override 關係
-├── deps      # Dependency 分析
-│   ├── graph      輸出 project 間的相依圖
-│   ├── cycles     偵測循環相依
-│   ├── nuget      列出 NuGet 套件相依
-│   └── namespaces namespace 間的使用關係
-├── sym       # Symbol 資訊查詢
-│   ├── info       取得 Symbol 的完整詳情
-│   ├── search     Wildcard 搜尋 Symbol
-│   ├── list       列出某 class / namespace 的所有成員
-│   └── hierarchy  顯示繼承與介面層級
-├── dead      # Dead Code 偵測
-│   ├── unused     找出未被任何地方參考的 Symbol
-│   ├── complexity 分析 cyclomatic complexity
-│   └── obsolete   找出所有使用 [Obsolete] API 的地方
-└── diag      # 診斷資訊
-    ├── errors     列出所有編譯錯誤
-    ├── warnings   列出所有警告
-    └── analyze    執行 Roslyn Analyzer 靜態分析
-```
-
----
-
-## 引數與選項
-
-### Positional Argument（必要）
-
-| 引數 | 說明 |
-|------|------|
-| `<target>` | `.sln` / `.csproj` / `.cs` 路徑（第一個位置引數，不帶旗標） |
-
-### Options（選用）
-
-| 選項 | 說明 |
-|------|------|
-| `--output <format>` | `json` / `text` / `mcp`（預設 `json`） |
-| `--symbol <name>` | 指定 Symbol 名稱或 Fully Qualified Name |
-| `--filter <kind>` | `class` / `method` / `property` / `event` / `field` |
-| `--visibility <level>` | `public` / `internal` / `private` / `all` |
-| `--exclude <pattern>` | 排除 glob 路徑（可多次使用） |
-| `--file <path>` | 指定 `.cs` 檔案路徑 |
-| `--line <number>` | 指定行號（搭配 `--file` 定位 Symbol） |
-| `--mcp-stdio` | 以 MCP stdio 模式啟動 |
-
----
-
-## 指令說明
-
-### `refs` — 參考關係查詢
-
-```bash
-# 找出誰呼叫了這個 method
-roslyn-cli refs callers MyApp.sln --symbol "OrderService.CalculateTotal"
-
-# 找出某 symbol 的所有使用位置
-roslyn-cli refs usages MyApp.sln --symbol "IRepository" --output json
-
-# 找出某 interface 的所有實作
-roslyn-cli refs impls MyApp.sln --symbol "IUserRepository"
-
-# 找出 override 關係
-roslyn-cli refs overrides MyApp.sln --symbol "BaseController.OnActionExecuted"
-
-# 以行號定位（類似 IDE Code Lens 點擊）
+# 以檔案 + 行號定位 symbol
 roslyn-cli refs callers MyLib.csproj --file "Services/OrderService.cs" --line 42
-```
 
-<details>
-<summary>JSON 輸出範例</summary>
-
-```json
-{
-  "command": "refs callers",
-  "symbol": "OrderService.CalculateTotal",
-  "symbolKind": "Method",
-  "fullyQualifiedName": "MyApp.Services.OrderService.CalculateTotal",
-  "callers": [
-    {
-      "callerSymbol": "OrderController.PlaceOrder",
-      "callerKind": "Method",
-      "file": "Controllers/OrderController.cs",
-      "line": 42,
-      "column": 18,
-      "snippet": "var total = _orderService.CalculateTotal(cart);"
-    }
-  ],
-  "totalCount": 1
-}
-```
-
-</details>
-
----
-
-### `deps` — Dependency 分析
-
-```bash
-# 輸出 project 相依圖
-roslyn-cli deps graph MyApp.sln --output json
-
-# 偵測循環相依
-roslyn-cli deps cycles MyApp.sln
-
-# 列出 NuGet 套件相依
-roslyn-cli deps nuget MyApp.csproj
-
-# namespace 間的使用關係（只看 MyApp.* 範圍）
-roslyn-cli deps namespaces MyApp.sln --filter "MyApp.*"
-```
-
-<details>
-<summary>JSON 輸出範例</summary>
-
-```json
-{
-  "command": "deps graph",
-  "projects": [
-    {
-      "name": "MyApp.Web",
-      "path": "src/MyApp.Web/MyApp.Web.csproj",
-      "dependsOn": ["MyApp.Services", "MyApp.Domain"]
-    },
-    {
-      "name": "MyApp.Services",
-      "path": "src/MyApp.Services/MyApp.Services.csproj",
-      "dependsOn": ["MyApp.Domain", "MyApp.Infrastructure"]
-    }
-  ]
-}
-```
-
-</details>
-
----
-
-### `sym` — Symbol 資訊查詢
-
-```bash
-# 取得完整 Symbol 資訊
-roslyn-cli sym info MyApp.sln --symbol "OrderService"
-
-# Wildcard 搜尋所有 *Service class
-roslyn-cli sym search MyApp.sln --symbol "*Service" --filter class
-
-# 列出某 class 的所有 public 成員
-roslyn-cli sym list MyApp.sln --symbol "OrderService" --visibility public
-
-# 繼承 / 介面層級
-roslyn-cli sym hierarchy MyApp.sln --symbol "OrderService"
-```
-
-<details>
-<summary>JSON 輸出範例</summary>
-
-```json
-{
-  "command": "sym info",
-  "symbol": "OrderService",
-  "fullyQualifiedName": "MyApp.Services.OrderService",
-  "kind": "Class",
-  "accessibility": "Public",
-  "isAbstract": false,
-  "isSealed": false,
-  "isStatic": false,
-  "containingNamespace": "MyApp.Services",
-  "containingAssembly": "MyApp.Services",
-  "baseType": "System.Object",
-  "interfaces": ["IOrderService"],
-  "attributes": ["RegisterService"],
-  "location": {
-    "file": "Services/OrderService.cs",
-    "line": 12
-  },
-  "members": {
-    "methods": 8,
-    "properties": 2,
-    "fields": 1
-  }
-}
-```
-
-</details>
-
----
-
-### `dead` — Dead Code 偵測
-
-```bash
-# 找出未使用的 public method
-roslyn-cli dead unused MyApp.sln --filter method --visibility public
-
-# 找出 cyclomatic complexity 超過 10 的方法
-roslyn-cli dead complexity MyApp.sln --threshold 10
-
-# 找出所有使用 [Obsolete] API 的地方
-roslyn-cli dead obsolete MyApp.sln
-```
-
-<details>
-<summary>JSON 輸出範例</summary>
-
-```json
-{
-  "command": "dead unused",
-  "unusedSymbols": [
-    {
-      "symbol": "OrderService.LegacyCalculate",
-      "kind": "Method",
-      "accessibility": "Public",
-      "file": "Services/OrderService.cs",
-      "line": 87
-    }
-  ],
-  "totalCount": 1
-}
-```
-
-</details>
-
----
-
-### `diag` — 診斷資訊
-
-```bash
-# 編譯錯誤清單
-roslyn-cli diag errors MyApp.sln --output json
-
-# 警告清單
-roslyn-cli diag warnings MyApp.sln
-
-# 執行 Roslyn Analyzer 靜態分析
-roslyn-cli diag analyze MyApp.sln
+# 以 MCP tool result 風格輸出單次查詢結果
+roslyn-cli sym info MyApp.sln --symbol "OrderService" --output mcp
 ```
 
 ---
 
-## MCP Server 模式
+## 指令樹
 
-`--mcp-stdio` 旗標讓 `roslyn-cli` 以 [MCP](https://modelcontextprotocol.io) stdio transport 啟動，AI Agent（如 Claude、Copilot 等）可透過 MCP protocol 直接呼叫各項分析功能，無需手動執行指令。
-
-```bash
-roslyn-cli --mcp-stdio MyApp.sln
+```text
+roslyn-cli
+├── refs
+│   ├── callers
+│   ├── usages
+│   ├── impls
+│   └── overrides
+├── deps
+│   ├── graph
+│   ├── cycles
+│   ├── nuget
+│   └── namespaces
+├── sym
+│   ├── info
+│   ├── search
+│   ├── list
+│   └── hierarchy
+├── dead
+│   ├── unused
+│   ├── complexity
+│   └── obsolete
+└── diag
+    ├── errors
+    ├── warnings
+    └── analyze
 ```
 
-### MCP Tool 對應表
+---
 
-| MCP Tool 名稱 | 對應 CLI 指令 |
+## 輸出格式
+
+### `json`
+
+預設輸出格式，適合腳本或其他工具直接處理。
+
+### `text`
+
+適合人類閱讀的純文字摘要，會帶出 symbol / kind / file / line 等重點資訊。
+
+### `mcp`
+
+輸出 MCP tool result 風格的 JSON：
+
+- `content`：文字摘要
+- `structuredContent`：完整結構化資料
+
+這個模式只改變輸出包裝格式，不提供 stdio transport，也不維護任何 server 狀態。
+
+---
+
+## 與 `RoslynMcp` 的分工
+
+| 專案 | 角色 |
 |---|---|
-| `find_callers` | `refs callers` |
-| `find_usages` | `refs usages` |
-| `find_implementations` | `refs impls` |
-| `find_overrides` | `refs overrides` |
-| `get_symbol_info` | `sym info` |
-| `search_symbols` | `sym search` |
-| `list_members` | `sym list` |
-| `get_hierarchy` | `sym hierarchy` |
-| `analyze_dependencies` | `deps graph` |
-| `find_cycles` | `deps cycles` |
-| `get_nuget_deps` | `deps nuget` |
-| `find_unused` | `dead unused` |
-| `analyze_complexity` | `dead complexity` |
-| `find_obsolete` | `dead obsolete` |
-| `get_diagnostics` | `diag errors` + `diag warnings` |
-| `run_analyzers` | `diag analyze` |
+| `RoslynCLI` | 一次性、stateless 的命令列查詢 |
+| `RoslynMcp` | stateful MCP stdio server，可透過 `load_target` / `get_loaded_target` / `release_target` 管理載入狀態 |
 
-### 在 Claude Desktop 設定
-
-在 `claude_desktop_config.json` 中加入：
-
-```json
-{
-  "mcpServers": {
-    "roslyn-cli": {
-      "command": "roslyn-cli",
-      "args": ["--mcp-stdio", "C:/Projects/MyApp/MyApp.sln"]
-    }
-  }
-}
-```
+如果 AI agent 需要在同一個 target 上連續呼叫多個工具而不想重載 workspace，請使用 `RoslynMcp`。
 
 ---
 
 ## 注意事項
 
-- **MSBuildWorkspace** 啟動時會透過 `MSBuildLocator.RegisterDefaults()` 自動偵測本機 .NET SDK，請確認目標 Solution 所需的 SDK 版本已安裝。
-- **跨 Project 參考查詢**（`refs` 系列）建議以 `.sln` 為 target；以單一 `.csproj` 為目標時，其他 project 的參考將不在分析範圍內，可能產生漏報。
-- **`--output mcp`** 格式輸出符合 MCP tool result 規範的 JSON，供 AI Agent 直接解析，與 `--mcp-stdio` 模式搭配使用。
-- **`--mcp-stdio`** 模式與一般 CLI 模式共用同一套 Roslyn 分析核心，差異僅在 transport 層。
+- `MSBuildWorkspace` 會透過 `MSBuildLocator.RegisterDefaults()` 自動偵測本機 SDK / MSBuild。
+- `refs` 類查詢若要拿到跨 project 的完整結果，建議以 `.sln` / `.slnx` 為 target。
+- `.cs` target 會以 in-memory adhoc project 載入，適合單檔快速分析，但不保證有完整跨專案語意。
+- `--output mcp` 只調整輸出格式；它**不等同於** MCP server。
 
 ---
 
 ## 相依套件
 
+`RoslynCLI` 本身目前**不依賴額外 CLI framework**，維持專案內建的輕量 parser；分析核心由 `RoslynLib` 提供。
+
 | NuGet Package | 用途 |
 |---|---|
-| `Microsoft.CodeAnalysis.Workspaces.MSBuild` | 開啟 Solution / Project |
-| `Microsoft.Build.Locator` | 自動偵測 MSBuild |
-| `System.CommandLine` | CLI 解析 |
-| `ModelContextProtocol` | MCP stdio server |
+| `Microsoft.CodeAnalysis.Workspaces.MSBuild` | 載入 solution / project |
+| `Microsoft.CodeAnalysis.CSharp.Workspaces` | C# syntax / semantic model |
+| `Microsoft.Build.Locator` | 啟動前定位 MSBuild |
 
 ---
 

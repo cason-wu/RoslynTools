@@ -12,16 +12,10 @@ internal static class Program
     {
         var normalizedArgs = NormalizeArguments(args);
 
-        if (TryGetMcpTarget(normalizedArgs, out var mcpTarget, out var mcpError))
+        if (ShouldShowHelp(normalizedArgs))
         {
-            if (!string.IsNullOrWhiteSpace(mcpError))
-            {
-                await Console.Error.WriteLineAsync(mcpError).ConfigureAwait(false);
-                return 1;
-            }
-
-            var mcpServer = new McpStdioServer(mcpTarget!, WorkspaceLoader, AnalysisService);
-            return await mcpServer.RunAsync().ConfigureAwait(false);
+            await Console.Out.WriteLineAsync(CliHelpText.Build()).ConfigureAwait(false);
+            return 0;
         }
 
         CliArguments parsedArguments;
@@ -32,6 +26,8 @@ internal static class Program
         catch (Exception ex)
         {
             await Console.Error.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            await Console.Error.WriteLineAsync(string.Empty).ConfigureAwait(false);
+            await Console.Error.WriteLineAsync(CliHelpText.Build()).ConfigureAwait(false);
             return 1;
         }
 
@@ -171,6 +167,15 @@ internal static class Program
         throw new InvalidOperationException("--output must be one of: json, text, mcp.");
     }
 
+    private static bool ShouldShowHelp(IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+            return true;
+
+        return args.Any(static arg => arg is "--help" or "-h")
+            || (args.Count == 1 && string.Equals(args[0], "help", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string[] NormalizeArguments(string[] args)
     {
         var firstNonOptionIndex = Array.FindIndex(args, static token => !token.StartsWith("-", StringComparison.Ordinal));
@@ -197,34 +202,6 @@ internal static class Program
 
         normalized.AddRange(args.Skip(firstNonOptionIndex + 3));
         return normalized.ToArray();
-    }
-
-    private static bool TryGetMcpTarget(
-        IReadOnlyList<string> args,
-        out string? target,
-        out string? error)
-    {
-        if (!args.Any(static token => string.Equals(token, "--mcp-stdio", StringComparison.OrdinalIgnoreCase)))
-        {
-            target = null;
-            error = null;
-            return false;
-        }
-
-        target = null;
-        foreach (var arg in args)
-        {
-            if (!LooksLikeTarget(arg))
-                continue;
-
-            target = arg;
-            break;
-        }
-
-        error = target is null
-            ? "--mcp-stdio 需要一個 target 路徑，例如 roslyn-cli --mcp-stdio MyApp.sln"
-            : null;
-        return true;
     }
 
     private static bool LooksLikeTarget(string token)

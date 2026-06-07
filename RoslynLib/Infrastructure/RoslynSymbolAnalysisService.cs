@@ -1,4 +1,6 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using RoslynLib.Domain.Models;
 
@@ -103,6 +105,7 @@ public sealed class RoslynSymbolAnalysisService
         var lineNumber = location?.GetLineSpan().StartLinePosition.Line + 1 ?? 0;
         var sourceDisplay = RoslynSymbolHelper.BuildSourceText(filePath, lineNumber);
         var methodDisplayName = RoslynSymbolHelper.BuildMemberDisplayName(method);
+        var assemblyName = method.ContainingAssembly?.Name ?? string.Empty;
 
         return new CallTreeNode
         {
@@ -115,9 +118,10 @@ public sealed class RoslynSymbolAnalysisService
             LineNumber = lineNumber,
             IsCallee = isCallee,
             SourceDisplay = sourceDisplay,
-            DisplayName = string.IsNullOrWhiteSpace(sourceDisplay)
-                ? methodDisplayName
-                : $"{methodDisplayName} - {sourceDisplay}",
+            DisplayName = methodDisplayName,
+            ProjectName = assemblyName,
+            AssemblyName = assemblyName,
+            Accessibility = method.DeclaredAccessibility.ToString(),
         };
     }
 
@@ -155,6 +159,13 @@ public sealed class RoslynSymbolAnalysisService
     {
         var references = await SymbolFinder.FindReferencesAsync(symbol, solution, cancellationToken)
             .ConfigureAwait(false);
+        var sourceLocation = RoslynSymbolHelper.GetSourceLocation(symbol);
+        var fileGroups = references
+            .SelectMany(static referencedSymbol => referencedSymbol.Locations)
+            .Where(static location => !string.IsNullOrWhiteSpace(location.Location.GetLineSpan().Path))
+            .GroupBy(static location => location.Location.GetLineSpan().Path, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var root = new ReferenceTreeNode
         {
@@ -165,33 +176,34 @@ public sealed class RoslynSymbolAnalysisService
             IsChildrenLoaded = true,
             ContainingNamespace = RoslynSymbolHelper.GetContainingNamespaceName(symbol),
             ContainingTypeName = symbol.ContainingType?.Name ?? string.Empty,
+            ProjectName = symbol.ContainingAssembly?.Name ?? string.Empty,
+            AssemblyName = symbol.ContainingAssembly?.Name ?? string.Empty,
+            Accessibility = symbol.DeclaredAccessibility.ToString(),
+            OccurrenceCount = fileGroups.Sum(static group => group.Count()),
+            LocationDisplay = RoslynSymbolHelper.BuildSourceText(sourceLocation.FilePath, sourceLocation.LineNumber),
         };
 
-        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var referencedSymbol in references)
+        foreach (var fileGroup in fileGroups)
         {
-            foreach (var location in referencedSymbol.Locations)
+            var firstLocation = fileGroup.First();
+            var path = fileGroup.Key;
+
+            root.Children.Add(new ReferenceTreeNode
             {
-                var path = location.Location.GetLineSpan().Path;
-                if (string.IsNullOrWhiteSpace(path))
-                    continue;
-
-                if (!seenFiles.Add(path))
-                    continue;
-
-                root.Children.Add(new ReferenceTreeNode
-                {
-                    Name = System.IO.Path.GetFileName(path),
-                    FullName = path,
-                    Kind = SymbolNodeKind.Reference,
-                    TargetSymbol = symbol,
-                    IsFileGroup = true,
-                    FilePath = path,
-                    HasUnloadedChildren = true,
-                    IsChildrenLoaded = false,
-                });
-            }
+                Name = $"{System.IO.Path.GetFileName(path)} ({fileGroup.Count()})",
+                FullName = path,
+                Kind = SymbolNodeKind.Reference,
+                TargetSymbol = symbol,
+                IsFileGroup = true,
+                FilePath = path,
+                HasUnloadedChildren = true,
+                IsChildrenLoaded = false,
+                ProjectName = firstLocation.Document.Project.Name,
+                AssemblyName = firstLocation.Document.Project.AssemblyName ?? firstLocation.Document.Project.Name,
+                Accessibility = symbol.DeclaredAccessibility.ToString(),
+                OccurrenceCount = fileGroup.Count(),
+                LocationDisplay = path,
+            });
         }
 
         root.HasUnloadedChildren = root.Children.Count > 0;
@@ -230,6 +242,8 @@ public sealed class RoslynSymbolAnalysisService
                 var col = span.StartLinePosition.Character;
                 var lineText = string.Empty;
                 var locationKey = string.Concat(span.Path, ":", line, ":", col);
+                var referenceKind = ReferenceKind.Other;
+                var locationDisplay = $"{System.IO.Path.GetFileName(span.Path)}:{line + 1}:{col + 1}";
 
                 if (!seenLocations.Add(locationKey))
                     continue;
@@ -241,6 +255,10 @@ public sealed class RoslynSymbolAnalysisService
                     if (line < text.Lines.Count)
                         lineText = text.Lines[line].ToString().Trim();
                 }
+
+                var syntaxRoot = await location.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+                var syntaxNode = syntaxRoot?.FindNode(location.Location.SourceSpan, getInnermostNodeForTie: true);
+                referenceKind = DetermineReferenceKind(syntaxNode);
 
                 // Resolve containing symbol (namespace / class / method-with-params) via semantic model
                 string containingNs = string.Empty;
@@ -260,18 +278,23 @@ public sealed class RoslynSymbolAnalysisService
 
                 fileGroupNode.Children.Add(new ReferenceTreeNode
                 {
-                    Name = $"L{line + 1}:{col + 1}",
+                    Name = $"{referenceKind} • L{line + 1}:{col + 1}",
                     FullName = $"{span.Path}:{line + 1}:{col + 1}",
                     Kind = SymbolNodeKind.Reference,
                     FilePath = span.Path,
                     LineNumber = line + 1,
                     Column = col + 1,
-                    ReferenceKind = ReferenceKind.Other,
+                    ReferenceKind = referenceKind,
                     LineText = lineText,
                     ContainingSymbol = containingSymbolDisplay,
                     ContainingNamespace = containingNs,
                     ContainingTypeName = containingTypeName,
                     ContainingContext = RoslynSymbolHelper.BuildContainingContext(containingNs, containingTypeName, containingSymbolDisplay),
+                    ProjectName = location.Document.Project.Name,
+                    AssemblyName = location.Document.Project.AssemblyName ?? location.Document.Project.Name,
+                    Accessibility = fileGroupNode.TargetSymbol.DeclaredAccessibility.ToString(),
+                    OccurrenceCount = 1,
+                    LocationDisplay = locationDisplay,
                     IsChildrenLoaded = true,
                 });
             }
@@ -281,5 +304,43 @@ public sealed class RoslynSymbolAnalysisService
         fileGroupNode.HasUnloadedChildren = false;
 
         return fileGroupNode.Children.OfType<ReferenceTreeNode>().ToList().AsReadOnly();
+    }
+
+    private static ReferenceKind DetermineReferenceKind(SyntaxNode? syntaxNode)
+    {
+        if (syntaxNode is null)
+            return ReferenceKind.Other;
+
+        var invocation = syntaxNode.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+        if (invocation?.Expression is IdentifierNameSyntax { Identifier.ValueText: "nameof" })
+            return ReferenceKind.NameOf;
+
+        if (syntaxNode.AncestorsAndSelf().OfType<TypeOfExpressionSyntax>().Any())
+            return ReferenceKind.TypeOf;
+
+        if (syntaxNode.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().Any())
+            return ReferenceKind.Invocation;
+
+        if (syntaxNode.Parent is AssignmentExpressionSyntax assignment)
+            return assignment.Left.Span.IntersectsWith(syntaxNode.Span)
+                ? ReferenceKind.Write
+                : ReferenceKind.Read;
+
+        if (syntaxNode.Parent is PrefixUnaryExpressionSyntax prefixExpression
+            && (prefixExpression.IsKind(SyntaxKind.PreIncrementExpression) || prefixExpression.IsKind(SyntaxKind.PreDecrementExpression)))
+        {
+            return ReferenceKind.Write;
+        }
+
+        if (syntaxNode.Parent is PostfixUnaryExpressionSyntax postfixExpression
+            && (postfixExpression.IsKind(SyntaxKind.PostIncrementExpression) || postfixExpression.IsKind(SyntaxKind.PostDecrementExpression)))
+        {
+            return ReferenceKind.Write;
+        }
+
+        if (syntaxNode.Parent is ArgumentSyntax argument && argument.RefOrOutKeyword.RawKind != 0)
+            return ReferenceKind.Write;
+
+        return ReferenceKind.Read;
     }
 }

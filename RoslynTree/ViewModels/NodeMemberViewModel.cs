@@ -20,6 +20,8 @@ public sealed class NodeMemberViewModel
     public ISymbol Symbol => Node.Symbol;
     public string FileName => Node.FileName;
     public int LineNumber => Node.LineNumber;
+    public string ProjectName => Node.ProjectName;
+    public string MetadataText => Node.MetadataText;
     public string TipText => Node.TipText;
 
     public NodeMemberViewModel(ProjectMemberNode node)

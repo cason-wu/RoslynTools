@@ -11,57 +11,84 @@ public sealed class ProjectNode
     private readonly Lazy<string> _fullName;
     private readonly Lazy<SymbolNodeKind> _kind;
     private readonly Lazy<string> _namespace;
-    private readonly Lazy<string> _sourceFileName;
+    private readonly Lazy<(string FilePath, string FileName, int LineNumber)> _source;
     private readonly Lazy<string> _displayName;
     private readonly Lazy<IReadOnlyList<ProjectMemberNode>> _members;
+    private readonly Lazy<string> _sourceDisplay;
+    private readonly Lazy<string> _metadataText;
     private readonly Lazy<string> _tipText;
 
-    public ProjectNode(INamedTypeSymbol symbol)
+    public ProjectNode(
+        INamedTypeSymbol symbol,
+        string projectName,
+        string assemblyName)
     {
         Symbol = symbol ?? throw new ArgumentNullException(nameof(symbol));
+        ProjectName = projectName ?? throw new ArgumentNullException(nameof(projectName));
+        AssemblyName = assemblyName ?? throw new ArgumentNullException(nameof(assemblyName));
         _fullName = new Lazy<string>(() => Symbol.ToDisplayString());
         _kind = new Lazy<SymbolNodeKind>(() => RoslynSymbolHelper.GetKind(Symbol.TypeKind));
         _namespace = new Lazy<string>(() => Symbol.ContainingNamespace?.ToDisplayString() ?? string.Empty);
-        _sourceFileName = new Lazy<string>(ResolveSourceFileName);
+        _source = new Lazy<(string FilePath, string FileName, int LineNumber)>(() => RoslynSymbolHelper.GetSourceLocation(Symbol));
         _displayName = new Lazy<string>(() => RoslynSymbolHelper.BuildTypeDisplayName(Symbol));
         _members = new Lazy<IReadOnlyList<ProjectMemberNode>>(BuildMembers);
+        _sourceDisplay = new Lazy<string>(() => RoslynSymbolHelper.BuildSourceText(FilePath, LineNumber));
+        _metadataText = new Lazy<string>(BuildMetadataText);
         _tipText = new Lazy<string>(BuildTipText);
     }
 
     public INamedTypeSymbol Symbol { get; }
+    public string ProjectName { get; }
+    public string AssemblyName { get; }
     public string Name => Symbol.Name;
     public string FullName => _fullName.Value;
     public SymbolNodeKind Kind => _kind.Value;
     public string Namespace => _namespace.Value;
-    public string SourceFileName => _sourceFileName.Value;
+    public string FilePath => _source.Value.FilePath;
+    public string SourceFileName => _source.Value.FileName;
+    public int LineNumber => _source.Value.LineNumber;
     public string DisplayName => _displayName.Value;
     public IReadOnlyList<ProjectMemberNode> Members => _members.Value;
+    public string SourceDisplay => _sourceDisplay.Value;
+    public string MetadataText => _metadataText.Value;
     public string TipText => _tipText.Value;
-
-    private string ResolveSourceFileName()
-    {
-        return Symbol.Locations
-            .Where(l => l.IsInSource)
-            .Select(l => l.SourceTree?.FilePath)
-            .Where(p => !string.IsNullOrEmpty(p))
-            .Select(Path.GetFileName)
-            .FirstOrDefault() ?? string.Empty;
-    }
 
     private IReadOnlyList<ProjectMemberNode> BuildMembers()
     {
         return Symbol.GetMembers()
             .Where(static member => !member.IsImplicitlyDeclared)
-            .Select(static member => new ProjectMemberNode(member))
+            .Select(member => new ProjectMemberNode(member, ProjectName, AssemblyName))
             .ToList()
             .AsReadOnly();
     }
 
+    private string BuildMetadataText()
+    {
+        var parts = new[]
+        {
+            string.IsNullOrWhiteSpace(ProjectName) ? null : ProjectName,
+            string.IsNullOrWhiteSpace(SourceDisplay) ? null : SourceDisplay,
+        };
+
+        return string.Join(" • ", parts.Where(static value => !string.IsNullOrWhiteSpace(value))!);
+    }
+
     private string BuildTipText()
     {
-        if (string.IsNullOrWhiteSpace(SourceFileName))
-            return FullName;
+        var lines = new List<string>
+        {
+            FullName,
+        };
 
-        return $"{FullName}{Environment.NewLine}Source: {SourceFileName}";
+        if (!string.IsNullOrWhiteSpace(ProjectName))
+            lines.Add($"Project: {ProjectName}");
+
+        if (!string.IsNullOrWhiteSpace(AssemblyName))
+            lines.Add($"Assembly: {AssemblyName}");
+
+        if (!string.IsNullOrWhiteSpace(SourceDisplay))
+            lines.Add($"Source: {SourceDisplay}");
+
+        return string.Join(Environment.NewLine, lines);
     }
 }

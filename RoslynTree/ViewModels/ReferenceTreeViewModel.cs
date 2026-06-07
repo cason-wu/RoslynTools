@@ -9,6 +9,7 @@ namespace RoslynTree.ViewModels;
 public partial class ReferenceTreeViewModel : ObservableObject
 {
     private readonly RoslynSymbolAnalysisService _analysisService;
+    private CancellationTokenSource? _analysisCancellationTokenSource;
 
     [ObservableProperty]
     private ObservableCollection<ReferenceTreeNodeViewModel> _references = [];
@@ -17,7 +18,7 @@ public partial class ReferenceTreeViewModel : ObservableObject
     private bool _isBusy;
 
     [ObservableProperty]
-    private string _statusMessage = "Select any symbol from the browser, then click Analyse.";
+    private string _statusMessage = "Select a symbol node to load references automatically.";
 
     public ISymbol? CurrentSymbol { get; private set; }
     public Project? CurrentProject { get; private set; }
@@ -32,32 +33,52 @@ public partial class ReferenceTreeViewModel : ObservableObject
         CurrentSymbol = symbol;
         CurrentProject = project;
         AnalyseCommand.NotifyCanExecuteChanged();
+        StartAutoAnalysis();
+    }
+
+    public void Clear()
+    {
+        CancelPendingAnalysis();
+        CurrentSymbol = null;
+        CurrentProject = null;
+        References.Clear();
+        StatusMessage = "Select a symbol node to load references automatically.";
+        AnalyseCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanAnalyse))]
     private async Task AnalyseAsync(CancellationToken cancellationToken)
     {
-        if (CurrentSymbol is null || CurrentProject is null) return;
+        var currentSymbol = CurrentSymbol;
+        var currentProject = CurrentProject;
+        if (currentSymbol is null || currentProject is null)
+            return;
 
         IsBusy = true;
-        StatusMessage = $"Finding all references to '{CurrentSymbol.Name}'…";
+        StatusMessage = $"Finding all references to '{currentSymbol.Name}'…";
         References.Clear();
 
         try
         {
             var nodes = await _analysisService.BuildReferenceTreeAsync(
-                CurrentSymbol, CurrentProject.Solution, cancellationToken)
+                currentSymbol, currentProject.Solution, cancellationToken)
                 .ConfigureAwait(true);
 
             foreach (var node in nodes)
-                References.Add(new ReferenceTreeNodeViewModel(node, LoadChildrenAsync));
+            {
+                var rootViewModel = new ReferenceTreeNodeViewModel(node, LoadChildrenAsync);
+                References.Add(rootViewModel);
+                rootViewModel.IsExpanded = true;
+            }
 
             var fileGroups = References.SelectMany(r => r.Children).Count();
             StatusMessage = $"{fileGroups} file group(s) found.";
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "Cancelled.";
+            StatusMessage = CurrentSymbol is null
+                ? "Select a symbol node to load references automatically."
+                : $"Reference load cancelled for '{CurrentSymbol.Name}'.";
         }
         catch (Exception ex)
         {
@@ -70,6 +91,20 @@ public partial class ReferenceTreeViewModel : ObservableObject
     }
 
     private bool CanAnalyse() => CurrentSymbol is not null && CurrentProject is not null && !IsBusy;
+
+    private void StartAutoAnalysis()
+    {
+        CancelPendingAnalysis();
+        _analysisCancellationTokenSource = new CancellationTokenSource();
+        _ = AnalyseAsync(_analysisCancellationTokenSource.Token);
+    }
+
+    private void CancelPendingAnalysis()
+    {
+        _analysisCancellationTokenSource?.Cancel();
+        _analysisCancellationTokenSource?.Dispose();
+        _analysisCancellationTokenSource = null;
+    }
 
     private async Task<IReadOnlyList<RoslynLib.Domain.Models.RoslynTreeNode>> LoadChildrenAsync(
         SymbolTreeNodeViewModel node,

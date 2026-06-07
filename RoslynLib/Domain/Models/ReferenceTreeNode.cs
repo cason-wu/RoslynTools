@@ -26,4 +26,9 @@ public sealed class ReferenceTreeNode : RoslynTreeNode
     public string ContainingNamespace { get; init; } = string.Empty;
     public string ContainingTypeName { get; init; } = string.Empty;
     public string ContainingContext { get; init; } = string.Empty;
+    public string ProjectName { get; init; } = string.Empty;
+    public string AssemblyName { get; init; } = string.Empty;
+    public string Accessibility { get; init; } = string.Empty;
+    public int OccurrenceCount { get; init; }
+    public string LocationDisplay { get; init; } = string.Empty;
 }

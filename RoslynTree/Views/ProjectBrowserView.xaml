@@ -32,6 +32,10 @@
                                Width="16" Height="16" Margin="0,0,4,0"/>
                         <TextBlock Text="{Binding Name}" FontSize="11"
                                    Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                        <TextBlock Margin="6,0,0,0"
+                                   Text="{Binding SummaryText}"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
                     </StackPanel>
                 </HierarchicalDataTemplate>
 
@@ -42,8 +46,12 @@
                                 ToolTip="{Binding TipText}">
                         <Image Source="{Binding Icon, Converter={StaticResource ImageMonikerToImageSourceConverter}}"
                                Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="{Binding Name}" FontSize="11"
-                                   Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                        <StackPanel>
+                            <TextBlock Text="{Binding Name}" FontSize="11"
+                                       Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                            <TextBlock Text="{Binding MetadataText}" FontSize="10"
+                                       Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                        </StackPanel>
                     </StackPanel>
                 </HierarchicalDataTemplate>
 
@@ -53,10 +61,16 @@
                                 ToolTip="{Binding TipText}">
                         <Image Source="{Binding Icon, Converter={StaticResource ImageMonikerToImageSourceConverter}}"
                                Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="{Binding Name}" FontSize="11"
-                                   Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
-                        <TextBlock Text="{Binding TypeName, StringFormat=' : {0}'}" FontSize="10"
-                                   Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Name}" FontSize="11"
+                                           Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                                <TextBlock Text="{Binding TypeName, StringFormat=' : {0}'}" FontSize="10"
+                                           Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding MetadataText}" FontSize="10"
+                                       Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"/>
+                        </StackPanel>
                     </StackPanel>
                 </DataTemplate>
             </TreeView.Resources>

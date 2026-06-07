@@ -11,4 +11,7 @@ public sealed class CallTreeNode : RoslynTreeNode
     public bool IsCallee { get; init; }
     public string DisplayName { get; init; } = string.Empty;
     public string SourceDisplay { get; init; } = string.Empty;
+    public string ProjectName { get; init; } = string.Empty;
+    public string AssemblyName { get; init; } = string.Empty;
+    public string Accessibility { get; init; } = string.Empty;
 }

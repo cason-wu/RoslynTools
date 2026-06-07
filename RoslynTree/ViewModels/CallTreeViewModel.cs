@@ -9,6 +9,7 @@ namespace RoslynTree.ViewModels;
 public partial class CallTreeViewModel : ObservableObject
 {
     private readonly RoslynSymbolAnalysisService _analysisService;
+    private CancellationTokenSource? _analysisCancellationTokenSource;
 
     [ObservableProperty]
     private ObservableCollection<CallTreeNodeViewModel> _roots = [];
@@ -17,7 +18,7 @@ public partial class CallTreeViewModel : ObservableObject
     private bool _isBusy;
 
     [ObservableProperty]
-    private string _statusMessage = "Select a method from the browser, then click Analyse.";
+    private string _statusMessage = "Select a method node to load callers automatically.";
 
     public IMethodSymbol? CurrentMethod { get; private set; }
     public Project? CurrentProject { get; private set; }
@@ -32,31 +33,51 @@ public partial class CallTreeViewModel : ObservableObject
         CurrentMethod = method;
         CurrentProject = project;
         AnalyseCommand.NotifyCanExecuteChanged();
+        StartAutoAnalysis();
+    }
+
+    public void Clear()
+    {
+        CancelPendingAnalysis();
+        CurrentMethod = null;
+        CurrentProject = null;
+        Roots.Clear();
+        StatusMessage = "Select a method node to load callers automatically.";
+        AnalyseCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanAnalyse))]
     private async Task AnalyseAsync(CancellationToken cancellationToken)
     {
-        if (CurrentMethod is null || CurrentProject is null) return;
+        var currentMethod = CurrentMethod;
+        var currentProject = CurrentProject;
+        if (currentMethod is null || currentProject is null)
+            return;
 
         IsBusy = true;
-        StatusMessage = $"Building call tree for {CurrentMethod.Name}…";
+        StatusMessage = $"Building call tree for {currentMethod.Name}…";
         Roots.Clear();
 
         try
         {
             var nodes = await _analysisService.BuildCallTreeAsync(
-                CurrentMethod, CurrentProject.Solution, cancellationToken)
+                currentMethod, currentProject.Solution, cancellationToken)
                 .ConfigureAwait(true);
 
             foreach (var node in nodes)
-                Roots.Add(new CallTreeNodeViewModel(node, LoadChildrenAsync));
+            {
+                var rootViewModel = new CallTreeNodeViewModel(node, LoadChildrenAsync);
+                Roots.Add(rootViewModel);
+                rootViewModel.IsExpanded = true;
+            }
 
             StatusMessage = $"{Roots.Count} root(s) found.";
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "Cancelled.";
+            StatusMessage = CurrentMethod is null
+                ? "Select a method node to load callers automatically."
+                : $"Caller load cancelled for {CurrentMethod.Name}.";
         }
         catch (Exception ex)
         {
@@ -69,6 +90,20 @@ public partial class CallTreeViewModel : ObservableObject
     }
 
     private bool CanAnalyse() => CurrentMethod is not null && CurrentProject is not null && !IsBusy;
+
+    private void StartAutoAnalysis()
+    {
+        CancelPendingAnalysis();
+        _analysisCancellationTokenSource = new CancellationTokenSource();
+        _ = AnalyseAsync(_analysisCancellationTokenSource.Token);
+    }
+
+    private void CancelPendingAnalysis()
+    {
+        _analysisCancellationTokenSource?.Cancel();
+        _analysisCancellationTokenSource?.Dispose();
+        _analysisCancellationTokenSource = null;
+    }
 
     private async Task<IReadOnlyList<RoslynLib.Domain.Models.RoslynTreeNode>> LoadChildrenAsync(
         SymbolTreeNodeViewModel node,

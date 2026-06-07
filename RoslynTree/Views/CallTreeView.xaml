@@ -5,20 +5,12 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Toolbar -->
-        <ToolBar Grid.Row="0" ToolBarTray.IsLocked="True">
-            <Button Content="▶ Analyse Callers"
-                    Command="{Binding AnalyseCommand}"
-                    Padding="8,2"/>
-        </ToolBar>
-
         <!-- Tree -->
-        <TreeView Grid.Row="1"
+        <TreeView Grid.Row="0"
                   ItemsSource="{Binding Roots}"
                   BorderThickness="0"
                   VirtualizingStackPanel.IsVirtualizing="True"
@@ -31,8 +23,10 @@
                                Width="16" Height="16" Margin="0,0,4,0"/>
                         <StackPanel>
                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12"/>
+                            <TextBlock Foreground="#0078D4" FontSize="10"
+                                       Text="{Binding MetadataText}"/>
                             <TextBlock Foreground="Gray" FontSize="10"
-                                       Text="{Binding ContainingType, StringFormat='  in {0}'}"/>
+                                       Text="{Binding SourceDisplay}"/>
                         </StackPanel>
                     </StackPanel>
                 </HierarchicalDataTemplate>
@@ -45,7 +39,7 @@
         </TreeView>
 
         <!-- Status / busy -->
-        <StatusBar Grid.Row="2">
+        <StatusBar Grid.Row="1">
             <StatusBarItem>
                 <ProgressBar Width="100" Height="12" IsIndeterminate="True"
                              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"/>

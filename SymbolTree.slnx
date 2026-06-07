@@ -2,5 +2,6 @@
   <Project Path="RoslynCLI/RoslynCLI.csproj" Id="c0f33977-a6a9-46cc-b8f1-498c7d20246b" />
   <Project Path="RoslynLib.Tests/RoslynLib.Tests.csproj" />
   <Project Path="RoslynLib/RoslynLib.csproj" />
+  <Project Path="RoslynMcp/RoslynMcp.csproj" />
   <Project Path="RoslynTree/RoslynTree.csproj" />
 </Solution>

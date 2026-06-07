@@ -23,6 +23,8 @@ public partial class NodeTypeViewModel : ObservableObject
     public string FullName => Node.FullName;
     public SymbolNodeKind Kind => Node.Kind;
     public string SourceFileName => Node.SourceFileName;
+    public string ProjectName => Node.ProjectName;
+    public string MetadataText => Node.MetadataText;
     public string TipText => Node.TipText;
 
     public ImageMoniker Icon { get; }

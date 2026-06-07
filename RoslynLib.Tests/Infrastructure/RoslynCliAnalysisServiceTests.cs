@@ -113,9 +113,158 @@ public sealed class RoslynCliAnalysisServiceTests
             """);
         var symbol = RoslynTestHelper.GetTypeSymbol(compilation, "Transformer");
 
-        var node = new ProjectNode(symbol);
+        var node = new ProjectNode(symbol, "DemoProject", "DemoAssembly");
 
         Assert.Equal("Transformer(ref int) : int", node.DisplayName);
+    }
+
+    [Fact(DisplayName = "Find callers returns direct caller locations")]
+    public async Task FindCallersAsync_MethodSymbol_ReturnsCallerLocations()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "CallersProject",
+            """
+            namespace Demo;
+
+            public class Service
+            {
+                public void Target() { }
+                public void Caller() => Target();
+            }
+            """);
+
+        var result = await _sut.FindCallersAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions
+            {
+                Symbol = "Demo.Service.Target()",
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(result.Callers);
+        Assert.Contains("Caller", result.Callers[0].CallerSymbol, StringComparison.Ordinal);
+        Assert.Contains("Target", result.Callers[0].Snippet, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Find usages returns containing context")]
+    public async Task FindUsagesAsync_TypeSymbol_ReturnsContainingContext()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "UsagesProject",
+            """
+            namespace Demo;
+
+            public interface IRepository { }
+
+            public class Consumer
+            {
+                private readonly IRepository _repository;
+
+                public Consumer(IRepository repository)
+                {
+                    _repository = repository;
+                }
+            }
+            """);
+
+        var result = await _sut.FindUsagesAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions
+            {
+                Symbol = "Demo.IRepository",
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.TotalCount >= 2);
+        Assert.Contains(result.Usages, static usage => usage.ContainingSymbol == "Consumer");
+    }
+
+    [Fact(DisplayName = "Find implementations returns interface implementations")]
+    public async Task FindImplementationsAsync_InterfaceType_ReturnsImplementingClass()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "ImplementationsProject",
+            """
+            namespace Demo;
+
+            public interface IWorker
+            {
+                void Run();
+            }
+
+            public class Worker : IWorker
+            {
+                public void Run() { }
+            }
+            """);
+
+        var result = await _sut.FindImplementationsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions
+            {
+                Symbol = "Demo.IWorker",
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(result.Implementations);
+        Assert.Contains("Worker", result.Implementations[0].Symbol, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Diagnostics errors returns compilation failures")]
+    public async Task GetErrorsAsync_InvalidCode_ReturnsCompilationErrors()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "ErrorsProject",
+            """
+            namespace Demo;
+
+            public class BrokenService
+            {
+                public int Run()
+                {
+                    return MissingValue;
+                }
+            }
+            """);
+
+        var result = await _sut.GetErrorsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions(),
+            TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(result.Diagnostics);
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Id == "CS0103");
+    }
+
+    [Fact(DisplayName = "Diagnostics warnings returns obsolete usage warnings")]
+    public async Task GetWarningsAsync_ObsoleteUsage_ReturnsWarningDiagnostics()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "WarningsProject",
+            """
+            namespace Demo;
+
+            public class LegacyService
+            {
+                [System.Obsolete]
+                public static void Legacy() { }
+            }
+
+            public class Consumer
+            {
+                public void Run()
+                {
+                    LegacyService.Legacy();
+                }
+            }
+            """);
+
+        var result = await _sut.GetWarningsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Id is "CS0612" or "CS0618");
     }
 
     private static IReadOnlyList<MetadataReference> BuildDefaultReferences()

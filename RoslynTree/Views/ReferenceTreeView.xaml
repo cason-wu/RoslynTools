@@ -5,20 +5,12 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Toolbar -->
-        <ToolBar Grid.Row="0" ToolBarTray.IsLocked="True">
-            <Button Content="▶ Find All References"
-                    Command="{Binding AnalyseCommand}"
-                    Padding="8,2"/>
-        </ToolBar>
-
         <!-- Reference tree -->
-        <TreeView Grid.Row="1"
+        <TreeView Grid.Row="0"
                   ItemsSource="{Binding References}"
                   BorderThickness="0"
                   VirtualizingStackPanel.IsVirtualizing="True"
@@ -38,6 +30,18 @@
                                     <Style TargetType="TextBlock">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ContainingContext}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Foreground="Gray" FontSize="10"
+                                       Text="{Binding MetadataText}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding MetadataText}" Value="">
                                                 <Setter Property="Visibility" Value="Collapsed"/>
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -72,7 +76,7 @@
         </TreeView>
 
         <!-- Status -->
-        <StatusBar Grid.Row="2">
+        <StatusBar Grid.Row="1">
             <StatusBarItem>
                 <ProgressBar Width="100" Height="12" IsIndeterminate="True"
                              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"/>

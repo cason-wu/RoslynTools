@@ -20,7 +20,7 @@ public partial class MainViewModel : ObservableObject
     private bool _isBusy;
 
     [ObservableProperty]
-    private string _statusMessage = "Ready. Open a project file to begin.";
+    private string _statusMessage = "Ready. Open a solution, project, or C# file to begin.";
 
     [ObservableProperty]
     private string _windowTitle = "RoslynTree";
@@ -56,8 +56,8 @@ public partial class MainViewModel : ObservableObject
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Open Project",
-            Filter = "Project files (*.csproj;*.vbproj;*.fsproj)|*.csproj;*.vbproj;*.fsproj",
+            Title = "Open Solution / Project",
+            Filter = "Solution / Project / C# files (*.sln;*.slnx;*.csproj;*.vbproj;*.fsproj;*.cs)|*.sln;*.slnx;*.csproj;*.vbproj;*.fsproj;*.cs",
             CheckFileExists = true,
         };
 
@@ -71,6 +71,9 @@ public partial class MainViewModel : ObservableObject
     {
         IsBusy = true;
         StatusMessage = $"Loading {System.IO.Path.GetFileName(path)}…";
+        NamespaceNodes.Clear();
+        ReferenceTreeVM.Clear();
+        CallTreeVM.Clear();
 
         try
         {
@@ -84,8 +87,12 @@ public partial class MainViewModel : ObservableObject
 
             NamespaceNodes = new ObservableCollection<NodeNamespaceViewModel>(
                 loaded.NamespaceNodes.Select(static node => new NodeNamespaceViewModel(node)));
-            WindowTitle = $"RoslynTree — {System.IO.Path.GetFileName(path)}";
-            StatusMessage = $"Loaded {loaded.Nodes.Count} type(s).";
+            WindowTitle = loaded.ProjectCount > 1
+                ? $"RoslynTree — {loaded.TargetName} ({loaded.ProjectCount} projects)"
+                : $"RoslynTree — {loaded.TargetName}";
+            StatusMessage = loaded.ProjectCount > 1
+                ? $"Loaded {loaded.Nodes.Count} type(s) across {loaded.ProjectCount} project(s)."
+                : $"Loaded {loaded.Nodes.Count} type(s).";
         }
         catch (OperationCanceledException)
         {
@@ -117,13 +124,17 @@ public partial class MainViewModel : ObservableObject
         // Push context to active tab VMs
         ReferenceTreeVM.SetContext(typeSymbol, _currentProject);
 
-        // For call tree, set first public method as default if available
         var firstMethod = typeSymbol.GetMembers()
             .OfType<IMethodSymbol>()
-            .FirstOrDefault(m => !m.IsImplicitlyDeclared);
+            .Where(static method => !method.IsImplicitlyDeclared && method.MethodKind == MethodKind.Ordinary)
+            .OrderByDescending(static method => method.DeclaredAccessibility == Microsoft.CodeAnalysis.Accessibility.Public)
+            .ThenBy(static method => method.Name, StringComparer.Ordinal)
+            .FirstOrDefault();
 
         if (firstMethod is not null)
             CallTreeVM.SetContext(firstMethod, _currentProject);
+        else
+            CallTreeVM.Clear();
 
         StatusMessage = $"Selected: {entry.FullName}";
     }
@@ -139,6 +150,8 @@ public partial class MainViewModel : ObservableObject
 
         if (member.Symbol is IMethodSymbol method)
             CallTreeVM.SetContext(method, _currentProject);
+        else
+            CallTreeVM.Clear();
 
         StatusMessage = $"Selected: {member.Symbol.ToDisplayString()}";
     }

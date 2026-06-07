@@ -16,6 +16,7 @@ public partial class NodeNamespaceViewModel : ObservableObject
 
     public ProjectNamespaceNode Node { get; }
     public string Name => Node.Name;
+    public string SummaryText => Node.SummaryText;
     public ImageMoniker Icon => VisualStudioSymbolIconMap.GetIcon(SymbolNodeKind.Namespace);
     public ObservableCollection<NodeTypeViewModel> Types { get; } = [];
 
