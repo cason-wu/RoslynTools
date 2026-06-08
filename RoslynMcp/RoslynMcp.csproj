@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -24,9 +24,10 @@
     <!-- Set recommended package metadata -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageId>roslyn-mcp</PackageId>
-    <PackageVersion>0.1.0-beta</PackageVersion>
+    <PackageVersion>0.1.1-beta</PackageVersion>
     <PackageTags>AI; MCP; Roslyn; .NET; symbol-analysis; stdio</PackageTags>
     <Description>Stateful MCP server for Roslyn-based .NET symbol analysis.</Description>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackRoslynBuildHosts</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <!-- Include additional files for browsing the MCP server. -->
@@ -43,5 +44,22 @@
   <ItemGroup>
     <ProjectReference Include="..\RoslynLib\RoslynLib.csproj" />
   </ItemGroup>
+
+  <Target Name="PackRoslynBuildHosts" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <TfmSpecificPackageFile
+        Include="$(TargetDir)BuildHost-netcore\**\*"
+        Exclude="$(TargetDir)BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json;$(TargetDir)BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.runtimeconfig.json">
+        <PackagePath>tools/any/$(RuntimeIdentifier)/BuildHost-netcore/</PackagePath>
+      </TfmSpecificPackageFile>
+
+      <TfmSpecificPackageFile
+        Include="$(TargetDir)BuildHost-net472\**\*"
+        Exclude="$(TargetDir)BuildHost-net472\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe.config"
+        Condition="Exists('$(TargetDir)BuildHost-net472')">
+        <PackagePath>tools/any/$(RuntimeIdentifier)/BuildHost-net472/</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
 
 </Project>

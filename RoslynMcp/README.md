@@ -1,7 +1,7 @@
-# roslyn-mcp
+﻿# roslyn-mcp
 
 > 以 [Model Context Protocol](https://modelcontextprotocol.io/) 為 transport、以 `RoslynLib` 為分析核心的 **stateful MCP stdio server**。  
-> 與 `RoslynCLI` 不同，`roslyn-mcp` 會在記憶體中保留目前載入的 target，讓多個 tool 呼叫可以重用同一個 workspace，不需要每次重新載入。
+> `roslyn-mcp` 會在記憶體中保留目前載入的 target，讓多個 tool 呼叫可以重用同一個 workspace，不需要每次重新載入。
 
 ---
 
@@ -94,19 +94,19 @@
 ## 以 NuGet MCP package 使用
 
 `RoslynMcp` 的 package id 與 tool command name 都是 `roslyn-mcp`。  
-發布到 NuGet 後，可用 `dnx` 方式在 VS Code 或 Visual Studio 中註冊：
+發布到 NuGet 後，建議在 VS Code、Visual Studio 或 Copilot 這類直接建立行程的 client 中，以 `dotnet dnx` 註冊，避免 `command: "dnx"` 在某些 Windows 環境無法解析：
 
 ```json
 {
   "servers": {
     "RoslynMcp": {
       "type": "stdio",
-      "command": "dnx",
+      "command": "dotnet",
       "args": [
+        "dnx",
         "roslyn-mcp",
         "--version",
-        "0.1.0-beta",
-        "--yes"
+        "0.1.1-beta"
       ]
     }
   }
@@ -117,8 +117,8 @@
 
 ## 建置與驗證
 
-- `dotnet build SymbolTree.slnx`
-- `dotnet test SymbolTree.slnx`
+- `dotnet build RoslynTools.slnx`
+- `dotnet test RoslynTools.slnx`
 
 `RoslynMcp` 採用 self-contained、single-file 設定，預設支援以下 runtime：
 
@@ -148,4 +148,3 @@
 | `RoslynMcp` | stateful MCP stdio server |
 | `RoslynTree` | WPF 桌面瀏覽器 |
 | `RoslynLib` | 共用分析核心與 read models |
-

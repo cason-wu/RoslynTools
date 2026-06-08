@@ -1,13 +1,13 @@
-{
+﻿{
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
   "description": "Stateful MCP server for Roslyn-based .NET symbol analysis.",
   "name": "roslyn-mcp",
-  "version": "0.1.0-beta",
+  "version": "0.1.1-beta",
   "packages": [
     {
       "registryType": "nuget",
       "identifier": "roslyn-mcp",
-      "version": "0.1.0-beta",
+      "version": "0.1.1-beta",
       "transport": {
         "type": "stdio"
       },
