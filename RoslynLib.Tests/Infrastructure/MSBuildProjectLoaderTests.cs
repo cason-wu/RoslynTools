@@ -1,13 +1,13 @@
-using System.Reflection;
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using RoslynLib.Domain.Models;
 using RoslynLib.Infrastructure;
 
 namespace RoslynLib.Tests.Infrastructure;
 
-public class MSBuildProjectLoader_ExtractSymbolsAsync
+public class ProjectNodeBuilderTests
 {
+    private readonly ProjectNodeBuilder _sut = new();
     private static readonly IReadOnlyList<MetadataReference> _references = BuildDefaultReferences();
 
     private static IReadOnlyList<MetadataReference> BuildDefaultReferences()
@@ -23,17 +23,24 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
     {
         var workspace = new AdhocWorkspace();
         var projectId = ProjectId.CreateNewId(projectName);
+        var projectFilePath = Path.Combine(Path.GetTempPath(), $"{projectName}.csproj");
+        var documentFilePath = Path.Combine(Path.GetTempPath(), documentName);
         var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
             projectId,
             VersionStamp.Default,
             projectName,
             projectName,
             LanguageNames.CSharp,
+            filePath: projectFilePath,
             metadataReferences: _references,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)));
 
         var documentId = DocumentId.CreateNewId(projectId, documentName);
-        solution = solution.AddDocument(documentId, documentName, Microsoft.CodeAnalysis.Text.SourceText.From(source));
+        solution = solution.AddDocument(
+            documentId,
+            documentName,
+            Microsoft.CodeAnalysis.Text.SourceText.From(source),
+            filePath: documentFilePath);
 
         return solution.GetProject(projectId)!;
     }
@@ -47,35 +54,15 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
     }
 
-    private static async Task<LoadedProject> InvokeExtractSymbolsAsync(Project project)
+    private static LoadedWorkspaceTarget CreateWorkspaceTarget(Project project)
     {
-        var method = typeof(MSBuildProjectLoader).GetMethod(
-            "extractSymbolsAsync",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.NotNull(method);
-
-        var task = (Task<LoadedProject>)method!.Invoke(
-            null,
-            [project, CancellationToken.None])!;
-
-        return await task.ConfigureAwait(false);
-    }
-
-    private static void InvokeCollectTypes(
-        INamespaceSymbol namespaceSymbol,
-        IAssemblySymbol projectAssembly,
-        List<ProjectNode> nodes)
-    {
-        var method = typeof(MSBuildProjectLoader).GetMethod(
-            "collectNamespaceNodes",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.NotNull(method);
-
-        method!.Invoke(
-            null,
-            [namespaceSymbol, projectAssembly, nodes]);
+        return new LoadedWorkspaceTarget(
+            project.Solution.Workspace,
+            project.FilePath ?? project.Name,
+            WorkspaceTargetKind.Project,
+            project.Solution,
+            project,
+            project.Documents.FirstOrDefault());
     }
 
     [Fact(DisplayName = "Collects top-level and nested source types")]
@@ -94,7 +81,8 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             "P1.cs");
 
         // Execute
-        var result = await InvokeExtractSymbolsAsync(project);
+        using var workspaceTarget = CreateWorkspaceTarget(project);
+        var result = await _sut.BuildAsync(workspaceTarget);
 
         // Verify
         Assert.Contains(result.Nodes, s => s.Name == "Outer" && s.Kind == SymbolNodeKind.Class);
@@ -112,7 +100,8 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             "P1.cs");
 
         // Execute
-        var result = await InvokeExtractSymbolsAsync(project);
+        using var workspaceTarget = CreateWorkspaceTarget(project);
+        var result = await _sut.BuildAsync(workspaceTarget);
 
         // Verify
         var expectedRoot = Path.GetDirectoryName(project.FilePath) ?? string.Empty;
@@ -136,9 +125,11 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             .Single(n => n.Name == "ForeignNs");
 
         // Execute
-        InvokeCollectTypes(
+        _sut.CollectNamespaceNodes(
             foreignNamespace,
             projectCompilation.Assembly,
+            "ProjectAssembly",
+            projectCompilation.Assembly.Name,
             nodes);
 
         // Verify
@@ -155,10 +146,10 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             "P1.cs");
 
         // Execute
-        var result = await InvokeExtractSymbolsAsync(project);
+        var result = await _sut.BuildProjectNodesAsync(project);
 
         // Verify
-        Assert.Contains(result.Nodes, s =>
+        Assert.Contains(result, s =>
             s.Name == "TopLevelType" &&
             (s.Namespace == string.Empty || s.Namespace == "<global namespace>") &&
             s.FullName == "TopLevelType");
@@ -174,8 +165,8 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             "IFoo.cs");
 
         // Execute
-        var result = await InvokeExtractSymbolsAsync(project);
-        var entry = Assert.Single(result.Nodes, s => s.Name == "IFoo");
+        var result = await _sut.BuildProjectNodesAsync(project);
+        var entry = Assert.Single(result, s => s.Name == "IFoo");
 
         // Verify
         Assert.Equal(entry.Symbol.Name, entry.Name);
@@ -194,8 +185,8 @@ public class MSBuildProjectLoader_ExtractSymbolsAsync
             "SourceBackedType.cs");
 
         // Execute
-        var result = await InvokeExtractSymbolsAsync(project);
-        var entry = Assert.Single(result.Nodes, s => s.Name == "SourceBackedType");
+        var result = await _sut.BuildProjectNodesAsync(project);
+        var entry = Assert.Single(result, s => s.Name == "SourceBackedType");
 
         // Verify
         Assert.Equal("SourceBackedType.cs", entry.SourceFileName);

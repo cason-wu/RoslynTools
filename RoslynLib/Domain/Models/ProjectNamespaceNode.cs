@@ -1,4 +1,4 @@
-namespace RoslynLib.Domain.Models;
+﻿namespace RoslynLib.Domain.Models;
 
 public sealed class ProjectNamespaceNode
 {
@@ -18,9 +18,6 @@ public sealed class ProjectNamespaceNode
     public int TypeCount => Types.Count;
     public IReadOnlyList<string> ProjectNames => _projectNames.Value;
     public int ProjectCount => ProjectNames.Count;
-    public string SummaryText => ProjectCount > 1
-        ? $"{TypeCount} types • {ProjectCount} projects"
-        : $"{TypeCount} types";
 
     private IReadOnlyList<string> BuildProjectNames()
     {

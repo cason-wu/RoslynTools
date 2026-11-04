@@ -10,9 +10,8 @@ internal class Program
     {
         var builder = Host.CreateApplicationBuilder(args);
 
-        // Configure all logs to go to stderr (stdout is used for the MCP protocol messages).
+        // Keep stdio quiet so MCP clients only receive protocol messages on the process streams.
         builder.Logging.ClearProviders();
-        builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
         builder.Services
             .AddSingleton<RoslynWorkspaceLoader>()

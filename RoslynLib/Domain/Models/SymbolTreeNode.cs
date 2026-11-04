@@ -1,6 +1,4 @@
-using System.Collections.ObjectModel;
-
-namespace RoslynLib.Domain.Models;
+﻿namespace RoslynLib.Domain.Models;
 
 public abstract class RoslynTreeNode
 {
@@ -9,5 +7,5 @@ public abstract class RoslynTreeNode
     public SymbolNodeKind Kind { get; init; }
     public bool HasUnloadedChildren { get; set; }
     public bool IsChildrenLoaded { get; set; }
-    public ObservableCollection<RoslynTreeNode> Children { get; } = [];
+    public List<RoslynTreeNode> Children { get; } = [];
 }

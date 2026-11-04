@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using RoslynLib.Infrastructure;
 
 namespace RoslynLib.Domain.Models;
@@ -15,8 +15,6 @@ public sealed class ProjectNode
     private readonly Lazy<string> _displayName;
     private readonly Lazy<IReadOnlyList<ProjectMemberNode>> _members;
     private readonly Lazy<string> _sourceDisplay;
-    private readonly Lazy<string> _metadataText;
-    private readonly Lazy<string> _tipText;
 
     public ProjectNode(
         INamedTypeSymbol symbol,
@@ -33,8 +31,6 @@ public sealed class ProjectNode
         _displayName = new Lazy<string>(() => RoslynSymbolHelper.BuildTypeDisplayName(Symbol));
         _members = new Lazy<IReadOnlyList<ProjectMemberNode>>(BuildMembers);
         _sourceDisplay = new Lazy<string>(() => RoslynSymbolHelper.BuildSourceText(FilePath, LineNumber));
-        _metadataText = new Lazy<string>(BuildMetadataText);
-        _tipText = new Lazy<string>(BuildTipText);
     }
 
     public INamedTypeSymbol Symbol { get; }
@@ -50,8 +46,6 @@ public sealed class ProjectNode
     public string DisplayName => _displayName.Value;
     public IReadOnlyList<ProjectMemberNode> Members => _members.Value;
     public string SourceDisplay => _sourceDisplay.Value;
-    public string MetadataText => _metadataText.Value;
-    public string TipText => _tipText.Value;
 
     private IReadOnlyList<ProjectMemberNode> BuildMembers()
     {
@@ -60,35 +54,5 @@ public sealed class ProjectNode
             .Select(member => new ProjectMemberNode(member, ProjectName, AssemblyName))
             .ToList()
             .AsReadOnly();
-    }
-
-    private string BuildMetadataText()
-    {
-        var parts = new[]
-        {
-            string.IsNullOrWhiteSpace(ProjectName) ? null : ProjectName,
-            string.IsNullOrWhiteSpace(SourceDisplay) ? null : SourceDisplay,
-        };
-
-        return string.Join(" • ", parts.Where(static value => !string.IsNullOrWhiteSpace(value))!);
-    }
-
-    private string BuildTipText()
-    {
-        var lines = new List<string>
-        {
-            FullName,
-        };
-
-        if (!string.IsNullOrWhiteSpace(ProjectName))
-            lines.Add($"Project: {ProjectName}");
-
-        if (!string.IsNullOrWhiteSpace(AssemblyName))
-            lines.Add($"Assembly: {AssemblyName}");
-
-        if (!string.IsNullOrWhiteSpace(SourceDisplay))
-            lines.Add($"Source: {SourceDisplay}");
-
-        return string.Join(Environment.NewLine, lines);
     }
 }

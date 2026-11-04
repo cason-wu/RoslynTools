@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using RoslynLib.Domain.Models;
 
 namespace RoslynLib.Infrastructure;
@@ -6,10 +6,19 @@ namespace RoslynLib.Infrastructure;
 public sealed class MSBuildProjectLoader
 {
     private readonly RoslynWorkspaceLoader _workspaceLoader;
+    private readonly ProjectNodeBuilder _projectNodeBuilder;
 
     public MSBuildProjectLoader(RoslynWorkspaceLoader workspaceLoader)
+        : this(workspaceLoader, new ProjectNodeBuilder())
+    {
+    }
+
+    internal MSBuildProjectLoader(
+        RoslynWorkspaceLoader workspaceLoader,
+        ProjectNodeBuilder projectNodeBuilder)
     {
         _workspaceLoader = workspaceLoader ?? throw new ArgumentNullException(nameof(workspaceLoader));
+        _projectNodeBuilder = projectNodeBuilder ?? throw new ArgumentNullException(nameof(projectNodeBuilder));
     }
 
     public async Task<LoadedProject> LoadProjectAsync(
@@ -26,7 +35,7 @@ public sealed class MSBuildProjectLoader
 
         try
         {
-            return await extractWorkspaceSymbolsAsync(
+            return await _projectNodeBuilder.BuildAsync(
                     workspaceTarget,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -36,102 +45,5 @@ public sealed class MSBuildProjectLoader
             workspaceTarget.Dispose();
             throw;
         }
-    }
-
-    private static async Task<LoadedProject> extractWorkspaceSymbolsAsync(
-        LoadedWorkspaceTarget workspaceTarget,
-        CancellationToken cancellationToken)
-    {
-        var primaryProject = workspaceTarget.PrimaryProject ?? workspaceTarget.Projects.First();
-        var nodes = new List<ProjectNode>();
-
-        foreach (var project in workspaceTarget.Projects)
-        {
-            var projectNodes = await extractProjectNodesAsync(project, cancellationToken).ConfigureAwait(false);
-            nodes.AddRange(projectNodes);
-        }
-
-        return new LoadedProject(primaryProject, nodes.AsReadOnly(), workspaceTarget: workspaceTarget);
-    }
-
-    private static async Task<IReadOnlyList<ProjectNode>> extractProjectNodesAsync(
-        Project project,
-        CancellationToken cancellationToken)
-    {
-        var nodes = new List<ProjectNode>();
-
-        var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
-        
-        if (compilation is null)
-            throw new InvalidOperationException($"Failed to get compilation for project '{project.Name}'.");
-
-        var assemblyName = project.AssemblyName ?? project.Name;
-        collectNamespaceNodesForProject(compilation.GlobalNamespace, compilation.Assembly, project.Name, assemblyName, nodes);
-
-        return nodes.AsReadOnly();
-    }
-
-    private static Task<LoadedProject> extractSymbolsAsync(
-        Project project,
-        CancellationToken cancellationToken)
-        => extractSymbolsAsyncCore(project, cancellationToken);
-
-    private static async Task<LoadedProject> extractSymbolsAsyncCore(
-        Project project,
-        CancellationToken cancellationToken)
-    {
-        var nodes = await extractProjectNodesAsync(project, cancellationToken).ConfigureAwait(false);
-        return new LoadedProject(project, nodes);
-    }
-
-    private static void collectNamespaceNodes(
-        INamespaceSymbol ns,
-        IAssemblySymbol projectAssembly,
-        List<ProjectNode> nodes)
-    {
-        collectNamespaceNodesForProject(ns, projectAssembly, string.Empty, projectAssembly.Name, nodes);
-    }
-
-    private static void collectNamespaceNodesForProject(
-        INamespaceSymbol ns,
-        IAssemblySymbol projectAssembly,
-        string projectName,
-        string assemblyName,
-        List<ProjectNode> nodes)
-    {
-        if (!ns.IsGlobalNamespace && !SymbolEqualityComparer.Default.Equals(ns.ContainingAssembly, projectAssembly))
-            return;
-
-        var typeSymbols = ns.GetTypeMembers().Where(t => t.Locations.Any(l => l.IsInSource)).ToList();
-
-        foreach (var iNamedTypeSymbol in typeSymbols)
-            addNode(nodes, iNamedTypeSymbol, projectName, assemblyName);
-
-        foreach (var iNamespaceSymbol in ns.GetNamespaceMembers())
-            collectNamespaceNodesForProject(iNamespaceSymbol, projectAssembly, projectName, assemblyName, nodes);
-    }
-
-    private static void collectTypeMembers(
-        INamedTypeSymbol parent,
-        string projectName,
-        string assemblyName,
-        List<ProjectNode> nodes)
-    {
-        var typeSymbols = parent.GetTypeMembers().Where(t => t.Locations.Any(l => l.IsInSource)).ToList();
-
-        foreach (var iNamedTypeSymbol in typeSymbols)
-            addNode(nodes, iNamedTypeSymbol, projectName, assemblyName);
-    }
-
-    private static void addNode(
-        List<ProjectNode> nodes,
-        INamedTypeSymbol iNamedTypeSymbol,
-        string projectName,
-        string assemblyName)
-    {
-        var node = new ProjectNode(iNamedTypeSymbol, projectName, assemblyName);
-        nodes.Add(node);
-
-        collectTypeMembers(iNamedTypeSymbol, projectName, assemblyName, nodes);
     }
 }

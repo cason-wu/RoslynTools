@@ -8,11 +8,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>RoslynMcp</RootNamespace>
     <AssemblyName>roslyn-mcp</AssemblyName>
-    <ToolCommandName>roslyn-mcp</ToolCommandName>
-
-    <!-- Set up the NuGet package to be an MCP server -->
-    <PackAsTool>true</PackAsTool>
-    <PackageType>McpServer</PackageType>
 
     <!-- Set up the MCP server to be a self-contained application that does not rely on a shared framework -->
     <SelfContained>true</SelfContained>
@@ -20,21 +15,7 @@
 
     <!-- Set up the MCP server to be a single file executable -->
     <PublishSingleFile>true</PublishSingleFile>
-
-    <!-- Set recommended package metadata -->
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageId>roslyn-mcp</PackageId>
-    <PackageVersion>0.1.1-beta</PackageVersion>
-    <PackageTags>AI; MCP; Roslyn; .NET; symbol-analysis; stdio</PackageTags>
-    <Description>Stateful MCP server for Roslyn-based .NET symbol analysis.</Description>
-    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackRoslynBuildHosts</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
-
-  <!-- Include additional files for browsing the MCP server. -->
-  <ItemGroup>
-    <None Include=".mcp\server.json" Pack="true" PackagePath="/.mcp/" />
-    <None Include="README.md" Pack="true" PackagePath="/" />
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
@@ -44,22 +25,5 @@
   <ItemGroup>
     <ProjectReference Include="..\RoslynLib\RoslynLib.csproj" />
   </ItemGroup>
-
-  <Target Name="PackRoslynBuildHosts" Condition="'$(RuntimeIdentifier)' != ''">
-    <ItemGroup>
-      <TfmSpecificPackageFile
-        Include="$(TargetDir)BuildHost-netcore\**\*"
-        Exclude="$(TargetDir)BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json;$(TargetDir)BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.runtimeconfig.json">
-        <PackagePath>tools/any/$(RuntimeIdentifier)/BuildHost-netcore/</PackagePath>
-      </TfmSpecificPackageFile>
-
-      <TfmSpecificPackageFile
-        Include="$(TargetDir)BuildHost-net472\**\*"
-        Exclude="$(TargetDir)BuildHost-net472\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.exe.config"
-        Condition="Exists('$(TargetDir)BuildHost-net472')">
-        <PackagePath>tools/any/$(RuntimeIdentifier)/BuildHost-net472/</PackagePath>
-      </TfmSpecificPackageFile>
-    </ItemGroup>
-  </Target>
 
 </Project>

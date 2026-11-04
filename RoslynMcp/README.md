@@ -89,36 +89,12 @@
 }
 ```
 
----
-
-## 以 NuGet MCP package 使用
-
-`RoslynMcp` 的 package id 與 tool command name 都是 `roslyn-mcp`。  
-發布到 NuGet 後，建議在 VS Code、Visual Studio 或 Copilot 這類直接建立行程的 client 中，以 `dotnet dnx` 註冊，避免 `command: "dnx"` 在某些 Windows 環境無法解析：
-
-```json
-{
-  "servers": {
-    "RoslynMcp": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": [
-        "dnx",
-        "roslyn-mcp",
-        "--version",
-        "0.1.1-beta"
-      ]
-    }
-  }
-}
-```
-
----
-
 ## 建置與驗證
 
 - `dotnet build RoslynTools.slnx`
 - `dotnet test RoslynTools.slnx`
+
+`roslyn-mcp` 預設不註冊 console logger，避免干擾 stdio MCP client。
 
 `RoslynMcp` 採用 self-contained、single-file 設定，預設支援以下 runtime：
 
