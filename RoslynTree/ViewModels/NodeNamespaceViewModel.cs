@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.VisualStudio.Imaging.Interop;
 using System.Collections.ObjectModel;
 using RoslynTree.Infrastructure;
@@ -16,7 +16,9 @@ public partial class NodeNamespaceViewModel : ObservableObject
 
     public ProjectNamespaceNode Node { get; }
     public string Name => Node.Name;
-    public string SummaryText => Node.SummaryText;
+    public string SummaryText => Node.ProjectCount > 1
+        ? $"{Node.TypeCount} types • {Node.ProjectCount} projects"
+        : $"{Node.TypeCount} types";
     public ImageMoniker Icon => VisualStudioSymbolIconMap.GetIcon(SymbolNodeKind.Namespace);
     public ObservableCollection<NodeTypeViewModel> Types { get; } = [];
 
