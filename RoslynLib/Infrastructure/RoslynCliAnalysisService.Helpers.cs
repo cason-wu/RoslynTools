@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -12,21 +13,23 @@ namespace RoslynLib.Infrastructure;
 
 public sealed partial class RoslynCliAnalysisService
 {
+    private readonly ConditionalWeakTable<Solution, IReadOnlyList<ISymbol>> _sourceSymbolCache = new();
+
     private async Task<DiagnosticsResult> GetDiagnosticsAsync(
         LoadedWorkspaceTarget workspaceTarget,
         RoslynCliQueryOptions options,
-        DiagnosticSeverity? severityFilter,
+        Func<DiagnosticSeverity, bool> severityFilter,
+        bool includeAnalyzers,
         string command,
         CancellationToken cancellationToken)
     {
-        var diagnostics = await CollectCompilationDiagnosticsAsync(workspaceTarget, cancellationToken).ConfigureAwait(false);
+        var diagnostics = await CollectDiagnosticsAsync(workspaceTarget, options, includeAnalyzers, cancellationToken).ConfigureAwait(false);
         var filtered = diagnostics
-            .Where(diagnostic => severityFilter is null
-                ? diagnostic.Severity != DiagnosticSeverity.Hidden
-                : diagnostic.Severity == severityFilter)
-            .Where(diagnostic => diagnostic.Location == Location.None || !RoslynSymbolHelper.IsPathExcluded(diagnostic.Location.GetLineSpan().Path, options.Excludes))
-            .Select(diagnostic =>
+            .Where(item => severityFilter(item.Diagnostic.Severity))
+            .Where(item => item.Diagnostic.Location == Location.None || !RoslynSymbolHelper.IsPathExcluded(item.Diagnostic.Location.GetLineSpan().Path, options.Excludes))
+            .Select(item =>
             {
+                var diagnostic = item.Diagnostic;
                 var span = diagnostic.Location == Location.None
                     ? default
                     : diagnostic.Location.GetLineSpan();
@@ -34,7 +37,7 @@ public sealed partial class RoslynCliAnalysisService
                     diagnostic.Id,
                     diagnostic.Severity.ToString(),
                     diagnostic.GetMessage(),
-                    ResolveProjectName(workspaceTarget, diagnostic.Location.SourceTree?.FilePath),
+                    item.ProjectName,
                     diagnostic.Location == Location.None
                         ? string.Empty
                         : FormatOutputPath(span.Path, workspaceTarget),
@@ -42,14 +45,43 @@ public sealed partial class RoslynCliAnalysisService
                     diagnostic.Location == Location.None ? 0 : span.StartLinePosition.Character + 1,
                     diagnostic.Descriptor.Category);
             })
-            .OrderBy(static item => item.File, StringComparer.OrdinalIgnoreCase)
+            .Distinct()
+            .OrderBy(static item => GetSeverityRank(item.Severity))
+            .ThenBy(static item => item.File, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static item => item.Line)
             .ThenBy(static item => item.Column)
             .ToList()
             .AsReadOnly();
 
-        return new DiagnosticsResult(command, filtered, filtered.Count);
+        return new DiagnosticsResult(command, Limit(filtered, options), filtered.Count, IsTruncated(filtered, options));
     }
+
+    private static int GetSeverityRank(string severity) => severity switch
+    {
+        nameof(DiagnosticSeverity.Error) => 0,
+        nameof(DiagnosticSeverity.Warning) => 1,
+        nameof(DiagnosticSeverity.Info) => 2,
+        _ => 3,
+    };
+
+    private static Func<DiagnosticSeverity, bool> ParseSeverityFilter(string? severity)
+    {
+        return (severity ?? "error").Trim().ToLowerInvariant() switch
+        {
+            "error" or "errors" => static value => value == DiagnosticSeverity.Error,
+            "warning" or "warnings" => static value => value == DiagnosticSeverity.Warning,
+            "all" => static value => value != DiagnosticSeverity.Hidden,
+            _ => throw new InvalidOperationException($"Unknown severity '{severity}'. Expected error, warning, or all."),
+        };
+    }
+
+    private static IReadOnlyList<T> Limit<T>(IReadOnlyList<T> items, RoslynCliQueryOptions options)
+        => IsTruncated(items, options)
+            ? items.Take(options.MaxResults!.Value).ToList().AsReadOnly()
+            : items;
+
+    private static bool IsTruncated<T>(IReadOnlyList<T> items, RoslynCliQueryOptions options)
+        => options.MaxResults is int maxResults && maxResults > 0 && items.Count > maxResults;
 
     private async Task<ISymbol> ResolveSymbolAsync(
         LoadedWorkspaceTarget workspaceTarget,
@@ -59,18 +91,19 @@ public sealed partial class RoslynCliAnalysisService
         if (!string.IsNullOrWhiteSpace(options.File) || options.Line is not null)
         {
             if (string.IsNullOrWhiteSpace(options.File) || options.Line is null)
-                throw new InvalidOperationException("--file and --line must be provided together.");
+                throw new InvalidOperationException("file and line must be provided together (CLI: --file and --line).");
 
             return await ResolveSymbolByLocationAsync(
                     workspaceTarget,
                     options.File!,
                     options.Line.Value,
+                    options.Column,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
 
         if (string.IsNullOrWhiteSpace(options.Symbol))
-            throw new InvalidOperationException("--symbol is required unless --file and --line are provided.");
+            throw new InvalidOperationException("symbol is required unless file and line are provided (CLI: --symbol, or --file and --line).");
 
         var symbols = await GetAllSourceSymbolsAsync(workspaceTarget, cancellationToken).ConfigureAwait(false);
         var matches = symbols
@@ -81,27 +114,60 @@ public sealed partial class RoslynCliAnalysisService
             .ToList();
 
         if (matches.Count == 0)
-            throw new InvalidOperationException($"Unable to resolve symbol '{options.Symbol}'.");
+            throw new InvalidOperationException($"Unable to resolve symbol '{options.Symbol}'. Use a wildcard symbol search (for example '*{options.Symbol}*') to find candidates.");
 
-        return matches[0].Symbol;
+        var bestMatches = matches
+            .TakeWhile(item => item.Score == matches[0].Score)
+            .Select(static item => item.Symbol)
+            .ToList();
+
+        // The same namespace (or a linked source file) can surface once per assembly; that is not a real ambiguity.
+        var distinctMatchCount = bestMatches
+            .Select(static symbol => (symbol.ToDisplayString(), RoslynSymbolHelper.GetKind(symbol)))
+            .Distinct()
+            .Count();
+
+        if (distinctMatchCount > 1)
+            throw new InvalidOperationException(BuildAmbiguousSymbolMessage(options.Symbol!, bestMatches, workspaceTarget));
+
+        return bestMatches[0];
+    }
+
+    private const int MaxAmbiguousCandidates = 10;
+
+    private static string BuildAmbiguousSymbolMessage(
+        string query,
+        IReadOnlyList<ISymbol> candidates,
+        LoadedWorkspaceTarget workspaceTarget)
+    {
+        var lines = candidates
+            .Take(MaxAmbiguousCandidates)
+            .Select(candidate =>
+            {
+                var source = RoslynSymbolHelper.GetSourceLocation(candidate);
+                var assembly = candidate.ContainingAssembly?.Name ?? string.Empty;
+                return $"  - {candidate.ToDisplayString()} [{RoslynSymbolHelper.GetKind(candidate)}] {FormatOutputPath(source.FilePath, workspaceTarget)}:{source.LineNumber} ({assembly})";
+            });
+
+        var remaining = candidates.Count > MaxAmbiguousCandidates
+            ? $"{Environment.NewLine}  ... and {candidates.Count - MaxAmbiguousCandidates} more."
+            : string.Empty;
+
+        return $"Symbol '{query}' is ambiguous ({candidates.Count} matches):{Environment.NewLine}"
+            + string.Join(Environment.NewLine, lines)
+            + remaining
+            + $"{Environment.NewLine}Specify a fully qualified name or signature (for example 'Namespace.Type.Method(int)'), or use file + line to select the symbol.";
     }
 
     private async Task<ISymbol> ResolveSymbolByLocationAsync(
         LoadedWorkspaceTarget workspaceTarget,
         string filePath,
         int lineNumber,
+        int? columnNumber,
         CancellationToken cancellationToken)
     {
-        var fullPath = ResolveDocumentPath(workspaceTarget, filePath);
-        var document = workspaceTarget.Solution.Projects
-            .SelectMany(static project => project.Documents)
-            .FirstOrDefault(candidate => string.Equals(
-                Path.GetFullPath(candidate.FilePath ?? string.Empty),
-                fullPath,
-                StringComparison.OrdinalIgnoreCase));
-
-        if (document is null)
-            throw new InvalidOperationException($"Unable to find document '{filePath}' in the current target.");
+        var document = FindDocuments(workspaceTarget, filePath).FirstOrDefault()
+            ?? throw new InvalidOperationException($"Unable to find document '{filePath}' in the current target. Use an absolute path or a path relative to the target directory.");
 
         var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
         var syntaxRoot = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
@@ -111,18 +177,31 @@ public sealed partial class RoslynCliAnalysisService
 
         var zeroBasedLine = lineNumber - 1;
         if (zeroBasedLine < 0 || zeroBasedLine >= text.Lines.Count)
-            throw new InvalidOperationException($"Line '{lineNumber}' is outside the bounds of '{filePath}'.");
+            throw new InvalidOperationException($"Line '{lineNumber}' is outside the bounds of '{filePath}' ({text.Lines.Count} lines).");
 
         var line = text.Lines[zeroBasedLine];
+
+        if (columnNumber is int column)
+        {
+            if (column < 1 || column > line.Span.Length + 1)
+                throw new InvalidOperationException($"Column '{column}' is outside the bounds of line {lineNumber} in '{filePath}' ({line.Span.Length} characters).");
+
+            var token = syntaxRoot.FindToken(line.Start + column - 1);
+            foreach (var node in token.Parent?.AncestorsAndSelf() ?? [])
+            {
+                var symbol = ResolveNodeSymbol(semanticModel, node, cancellationToken);
+                if (symbol is not null)
+                    return symbol;
+            }
+        }
+
         var candidateNodes = syntaxRoot.DescendantNodes(line.Span)
             .OrderBy(static node => node.Span.Length)
             .ToList();
 
         foreach (var node in candidateNodes)
         {
-            var symbol = semanticModel.GetDeclaredSymbol(node, cancellationToken)
-                ?? semanticModel.GetSymbolInfo(node, cancellationToken).Symbol;
-
+            var symbol = ResolveNodeSymbol(semanticModel, node, cancellationToken);
             if (symbol is not null)
                 return symbol;
         }
@@ -131,10 +210,43 @@ public sealed partial class RoslynCliAnalysisService
         return enclosingSymbol ?? throw new InvalidOperationException($"No symbol found at {filePath}:{lineNumber}.");
     }
 
+    private static ISymbol? ResolveNodeSymbol(SemanticModel semanticModel, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var symbolInfo = semanticModel.GetSymbolInfo(node, cancellationToken);
+        return semanticModel.GetDeclaredSymbol(node, cancellationToken)
+            ?? symbolInfo.Symbol
+            ?? symbolInfo.CandidateSymbols.FirstOrDefault();
+    }
+
+    private static IReadOnlyList<Document> FindDocuments(LoadedWorkspaceTarget workspaceTarget, string filePath)
+    {
+        var fullPath = ResolveDocumentPath(workspaceTarget, filePath);
+        var documents = workspaceTarget.Solution.GetDocumentIdsWithFilePath(fullPath)
+            .Select(documentId => workspaceTarget.Solution.GetDocument(documentId))
+            .OfType<Document>()
+            .ToList();
+
+        if (documents.Count > 0)
+            return documents.AsReadOnly();
+
+        return workspaceTarget.Solution.Projects
+            .SelectMany(static project => project.Documents)
+            .Where(candidate => string.Equals(
+                Path.GetFullPath(candidate.FilePath ?? string.Empty),
+                fullPath,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList()
+            .AsReadOnly();
+    }
+
     private async Task<IReadOnlyList<ISymbol>> GetAllSourceSymbolsAsync(
         LoadedWorkspaceTarget workspaceTarget,
         CancellationToken cancellationToken)
     {
+        // Solution snapshots are immutable, so the symbol list stays valid until the session swaps in a new snapshot.
+        if (_sourceSymbolCache.TryGetValue(workspaceTarget.Solution, out var cached))
+            return cached;
+
         var symbols = new List<ISymbol>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -146,7 +258,7 @@ public sealed partial class RoslynCliAnalysisService
             if (compilation is null)
                 continue;
 
-            foreach (var symbol in EnumerateNamespaceSymbols(compilation.GlobalNamespace, compilation.Assembly))
+            foreach (var symbol in EnumerateNamespaceSymbols(compilation.Assembly.GlobalNamespace))
             {
                 var key = BuildSymbolIdentityKey(symbol);
                 if (seen.Add(key))
@@ -154,25 +266,21 @@ public sealed partial class RoslynCliAnalysisService
             }
         }
 
-        return symbols.AsReadOnly();
+        var result = symbols.AsReadOnly();
+        _sourceSymbolCache.AddOrUpdate(workspaceTarget.Solution, result);
+        return result;
     }
 
-    private static IEnumerable<ISymbol> EnumerateNamespaceSymbols(
-        INamespaceSymbol namespaceSymbol,
-        IAssemblySymbol projectAssembly)
+    // Walk the source assembly's own namespace tree; the compilation-level global namespace merges
+    // referenced assemblies, and merged namespaces have no ContainingAssembly to filter on.
+    private static IEnumerable<ISymbol> EnumerateNamespaceSymbols(INamespaceSymbol namespaceSymbol)
     {
         if (!namespaceSymbol.IsGlobalNamespace)
             yield return namespaceSymbol;
 
         foreach (var nestedNamespace in namespaceSymbol.GetNamespaceMembers())
         {
-            if (!nestedNamespace.IsGlobalNamespace
-                && !SymbolEqualityComparer.Default.Equals(nestedNamespace.ContainingAssembly, projectAssembly))
-            {
-                continue;
-            }
-
-            foreach (var symbol in EnumerateNamespaceSymbols(nestedNamespace, projectAssembly))
+            foreach (var symbol in EnumerateNamespaceSymbols(nestedNamespace))
                 yield return symbol;
         }
 
@@ -208,6 +316,16 @@ public sealed partial class RoslynCliAnalysisService
         }
     }
 
+    private static readonly SymbolDisplayFormat QualifiedNameWithoutParametersFormat = new(
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        memberOptions: SymbolDisplayMemberOptions.IncludeContainingType);
+
+    private static readonly SymbolDisplayFormat QualifiedNameWithoutParametersOrGenericsFormat = new(
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.None,
+        memberOptions: SymbolDisplayMemberOptions.IncludeContainingType);
+
     private static int ScoreSymbolMatch(ISymbol symbol, string query)
     {
         if (string.Equals(symbol.ToDisplayString(), query, StringComparison.OrdinalIgnoreCase))
@@ -216,11 +334,27 @@ public sealed partial class RoslynCliAnalysisService
         if (string.Equals(RoslynSymbolHelper.FormatSymbolDisplayName(symbol), query, StringComparison.OrdinalIgnoreCase))
             return 1;
 
-        if (string.Equals(symbol.Name, query, StringComparison.OrdinalIgnoreCase))
+        var qualifiedName = symbol.ToDisplayString(QualifiedNameWithoutParametersFormat);
+        var qualifiedNameWithoutGenerics = symbol.ToDisplayString(QualifiedNameWithoutParametersOrGenericsFormat);
+        if (string.Equals(qualifiedName, query, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(qualifiedNameWithoutGenerics, query, StringComparison.OrdinalIgnoreCase))
+        {
             return 2;
+        }
+
+        if (string.Equals(symbol.Name, query, StringComparison.OrdinalIgnoreCase))
+            return 3;
 
         if (symbol.ToDisplayString().EndsWith($".{query}", StringComparison.OrdinalIgnoreCase))
-            return 3;
+            return 4;
+
+        // Lets 'Type.Method' match methods, whose full display string includes the parameter list
+        // (and generic methods, whose qualified name includes '<T>').
+        if (qualifiedName.EndsWith($".{query}", StringComparison.OrdinalIgnoreCase)
+            || qualifiedNameWithoutGenerics.EndsWith($".{query}", StringComparison.OrdinalIgnoreCase))
+        {
+            return 5;
+        }
 
         if (RoslynSymbolHelper.WildcardMatch(symbol.ToDisplayString(), query))
             return 10;
@@ -332,13 +466,64 @@ public sealed partial class RoslynCliAnalysisService
             BaseTypeSyntax);
     }
 
-    private static async Task<IReadOnlyList<Diagnostic>> CollectCompilationDiagnosticsAsync(
+    private sealed record ProjectDiagnostic(Diagnostic Diagnostic, string ProjectName);
+
+    private static async Task<IReadOnlyList<ProjectDiagnostic>> CollectDiagnosticsAsync(
         LoadedWorkspaceTarget workspaceTarget,
+        RoslynCliQueryOptions options,
+        bool includeAnalyzers,
         CancellationToken cancellationToken)
     {
-        var diagnostics = new List<Diagnostic>();
+        var diagnostics = new List<ProjectDiagnostic>();
 
-        foreach (var project in workspaceTarget.Projects)
+        if (!string.IsNullOrWhiteSpace(options.File))
+        {
+            var documents = FindDocuments(workspaceTarget, options.File);
+            if (documents.Count == 0)
+                throw new InvalidOperationException($"Unable to find document '{options.File}' in the current target. Use an absolute path or a path relative to the target directory.");
+
+            foreach (var document in documents.Where(document => MatchesProject(document.Project, options.Project)))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+                if (semanticModel is null)
+                    continue;
+
+                diagnostics.AddRange(semanticModel.GetDiagnostics(cancellationToken: cancellationToken)
+                    .Select(diagnostic => new ProjectDiagnostic(diagnostic, document.Project.Name)));
+
+                var compilationWithAnalyzers = includeAnalyzers
+                    ? CreateCompilationWithAnalyzers(document.Project, semanticModel.Compilation)
+                    : null;
+                if (compilationWithAnalyzers is null)
+                    continue;
+
+                var syntaxDiagnostics = await compilationWithAnalyzers
+                    .GetAnalyzerSyntaxDiagnosticsAsync(semanticModel.SyntaxTree, cancellationToken)
+                    .ConfigureAwait(false);
+                var semanticDiagnostics = await compilationWithAnalyzers
+                    .GetAnalyzerSemanticDiagnosticsAsync(semanticModel, filterSpan: null, cancellationToken)
+                    .ConfigureAwait(false);
+
+                diagnostics.AddRange(syntaxDiagnostics.Concat(semanticDiagnostics)
+                    .Select(diagnostic => new ProjectDiagnostic(diagnostic, document.Project.Name)));
+            }
+
+            return diagnostics.AsReadOnly();
+        }
+
+        var projects = workspaceTarget.Projects
+            .Where(project => MatchesProject(project, options.Project))
+            .ToList();
+
+        if (projects.Count == 0)
+        {
+            var available = string.Join(", ", workspaceTarget.Projects.Select(static project => project.Name).Order(StringComparer.Ordinal));
+            throw new InvalidOperationException($"No project matches '{options.Project}'. Available projects: {available}.");
+        }
+
+        foreach (var project in projects)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -346,23 +531,37 @@ public sealed partial class RoslynCliAnalysisService
             if (compilation is null)
                 continue;
 
-            diagnostics.AddRange(compilation.GetDiagnostics(cancellationToken));
+            diagnostics.AddRange(compilation.GetDiagnostics(cancellationToken)
+                .Select(diagnostic => new ProjectDiagnostic(diagnostic, project.Name)));
 
-            var analyzers = project.AnalyzerReferences
-                .SelectMany(reference => reference.GetAnalyzers(project.Language))
-                .ToImmutableArray();
-
-            if (analyzers.Length == 0)
+            var compilationWithAnalyzers = includeAnalyzers
+                ? CreateCompilationWithAnalyzers(project, compilation)
+                : null;
+            if (compilationWithAnalyzers is null)
                 continue;
 
-            var compilationWithAnalyzers = compilation.WithAnalyzers(
-                analyzers,
-                options: null);
-            diagnostics.AddRange(await compilationWithAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false));
+            var analyzerDiagnostics = await compilationWithAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
+            diagnostics.AddRange(analyzerDiagnostics.Select(diagnostic => new ProjectDiagnostic(diagnostic, project.Name)));
         }
 
         return diagnostics.AsReadOnly();
     }
+
+    private static CompilationWithAnalyzers? CreateCompilationWithAnalyzers(Project project, Compilation compilation)
+    {
+        var analyzers = project.AnalyzerReferences
+            .SelectMany(reference => reference.GetAnalyzers(project.Language))
+            .ToImmutableArray();
+
+        // Pass the project's analyzer options so .editorconfig / globalconfig severities are honored.
+        return analyzers.Length == 0
+            ? null
+            : compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
+    }
+
+    private static bool MatchesProject(Project project, string? projectFilter)
+        => string.IsNullOrWhiteSpace(projectFilter)
+            || RoslynSymbolHelper.WildcardMatch(project.Name, projectFilter);
 
     private static async Task<IReadOnlyList<ISymbol>> FindMemberImplementationsAsync(
         ISymbol symbol,
@@ -426,20 +625,6 @@ public sealed partial class RoslynCliAnalysisService
                 .FirstOrDefault(candidate => SymbolEqualityComparer.Default.Equals(candidate.OverriddenEvent, eventSymbol)),
             _ => null,
         };
-    }
-
-    private static string ResolveProjectName(LoadedWorkspaceTarget workspaceTarget, string? sourcePath)
-    {
-        if (string.IsNullOrWhiteSpace(sourcePath))
-            return string.Empty;
-
-        var fullPath = Path.GetFullPath(sourcePath);
-        return workspaceTarget.Projects.FirstOrDefault(project =>
-                project.Documents.Any(document => string.Equals(
-                    Path.GetFullPath(document.FilePath ?? string.Empty),
-                    fullPath,
-                    StringComparison.OrdinalIgnoreCase)))?.Name
-            ?? string.Empty;
     }
 
     private static string ResolveDocumentPath(LoadedWorkspaceTarget workspaceTarget, string filePath)

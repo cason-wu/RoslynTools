@@ -75,6 +75,37 @@ public sealed record SymbolListEntryView(
     string File,
     int Line);
 
+public sealed record SourceRangeView(
+    string File,
+    int StartLine,
+    int EndLine);
+
+public sealed record SymbolSourceView(
+    string File,
+    int StartLine,
+    int EndLine,
+    string Source,
+    bool Truncated);
+
+public sealed record DocumentSymbolView(
+    string Symbol,
+    string FullyQualifiedName,
+    string Kind,
+    string Accessibility,
+    int StartLine,
+    int EndLine,
+    int Depth);
+
+public sealed record CalleeView(
+    string Symbol,
+    string Kind,
+    string ContainingType,
+    string ContainingAssembly,
+    bool IsSource,
+    string File,
+    int Line,
+    IReadOnlyList<int> CallLines);
+
 public sealed record SymbolMemberSummaryView(
     int Methods,
     int Properties,
@@ -123,7 +154,8 @@ public sealed record CallersResult(
     string SymbolKind,
     string FullyQualifiedName,
     IReadOnlyList<CallerView> Callers,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record UsagesResult(
     string Command,
@@ -131,7 +163,8 @@ public sealed record UsagesResult(
     string SymbolKind,
     string FullyQualifiedName,
     IReadOnlyList<UsageView> Usages,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record ImplementationsResult(
     string Command,
@@ -139,7 +172,8 @@ public sealed record ImplementationsResult(
     string SymbolKind,
     string FullyQualifiedName,
     IReadOnlyList<ImplementationView> Implementations,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record OverridesResult(
     string Command,
@@ -147,7 +181,8 @@ public sealed record OverridesResult(
     string SymbolKind,
     string FullyQualifiedName,
     IReadOnlyList<OverrideView> Overrides,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record DependencyGraphResult(
     string Command,
@@ -166,7 +201,8 @@ public sealed record NugetDependenciesResult(
 public sealed record NamespaceDependenciesResult(
     string Command,
     IReadOnlyList<NamespaceDependencyView> Dependencies,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record SymbolInfoResult(
     string Command,
@@ -183,20 +219,26 @@ public sealed record SymbolInfoResult(
     IReadOnlyList<string> Interfaces,
     IReadOnlyList<string> Attributes,
     SourceLocationView Location,
-    SymbolMemberSummaryView Members);
+    SymbolMemberSummaryView Members,
+    string Signature,
+    string ReturnType,
+    string Summary,
+    IReadOnlyList<SourceRangeView> Declarations);
 
 public sealed record SymbolSearchResult(
     string Command,
     string Pattern,
     IReadOnlyList<SymbolSearchEntryView> Symbols,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record SymbolListResult(
     string Command,
     string Symbol,
     string FullyQualifiedName,
     IReadOnlyList<SymbolListEntryView> Members,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record SymbolHierarchyResult(
     string Command,
@@ -211,20 +253,49 @@ public sealed record SymbolHierarchyResult(
 public sealed record UnusedSymbolsResult(
     string Command,
     IReadOnlyList<UnusedSymbolView> UnusedSymbols,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record ComplexityAnalysisResult(
     string Command,
     int Threshold,
     IReadOnlyList<ComplexityEntryView> Methods,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record ObsoleteUsagesResult(
     string Command,
     IReadOnlyList<ObsoleteUsageView> ObsoleteUsages,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
 
 public sealed record DiagnosticsResult(
     string Command,
     IReadOnlyList<DiagnosticEntryView> Diagnostics,
-    int TotalCount);
+    int TotalCount,
+    bool Truncated = false);
+
+public sealed record SymbolSourceResult(
+    string Command,
+    string Symbol,
+    string FullyQualifiedName,
+    string Kind,
+    IReadOnlyList<SymbolSourceView> Declarations,
+    int TotalCount,
+    bool Truncated = false);
+
+public sealed record DocumentSymbolsResult(
+    string Command,
+    string File,
+    IReadOnlyList<DocumentSymbolView> Symbols,
+    int TotalCount,
+    bool Truncated = false);
+
+public sealed record CalleesResult(
+    string Command,
+    string Symbol,
+    string SymbolKind,
+    string FullyQualifiedName,
+    IReadOnlyList<CalleeView> Callees,
+    int TotalCount,
+    bool Truncated = false);

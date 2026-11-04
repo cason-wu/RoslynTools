@@ -123,12 +123,50 @@ internal static class CliOutputWriter
                 AppendPair(builder, "Namespace", symbolInfo.ContainingNamespace);
                 AppendPair(builder, "Assembly", symbolInfo.ContainingAssembly);
                 AppendPair(builder, "BaseType", string.IsNullOrWhiteSpace(symbolInfo.BaseType) ? "(none)" : symbolInfo.BaseType);
+                AppendPair(builder, "Signature", symbolInfo.Signature);
+                if (!string.IsNullOrWhiteSpace(symbolInfo.ReturnType))
+                    AppendPair(builder, "ReturnType", symbolInfo.ReturnType);
+                if (!string.IsNullOrWhiteSpace(symbolInfo.Summary))
+                    AppendPair(builder, "Summary", symbolInfo.Summary);
                 AppendPair(builder, "Location", $"{symbolInfo.Location.File}:{symbolInfo.Location.Line}");
+                if (symbolInfo.Declarations.Count > 0)
+                    AppendPair(builder, "Declarations", string.Join(", ", symbolInfo.Declarations.Select(static item => $"{item.File}:{item.StartLine}-{item.EndLine}")));
                 AppendPair(builder, "Members", $"methods={symbolInfo.Members.Methods}, properties={symbolInfo.Members.Properties}, fields={symbolInfo.Members.Fields}, events={symbolInfo.Members.Events}, nestedTypes={symbolInfo.Members.NestedTypes}");
                 if (symbolInfo.Interfaces.Count > 0)
                     AppendPair(builder, "Interfaces", string.Join(", ", symbolInfo.Interfaces));
                 if (symbolInfo.Attributes.Count > 0)
                     AppendPair(builder, "Attributes", string.Join(", ", symbolInfo.Attributes));
+                break;
+
+            case SymbolSourceResult symbolSource:
+                AppendPair(builder, "Command", symbolSource.Command);
+                AppendPair(builder, "Symbol", symbolSource.FullyQualifiedName);
+                AppendPair(builder, "Declarations", symbolSource.TotalCount);
+                foreach (var declaration in symbolSource.Declarations)
+                {
+                    var truncatedText = declaration.Truncated ? " (truncated by --max-lines)" : string.Empty;
+                    builder.AppendLine($"--- {declaration.File}:{declaration.StartLine}-{declaration.EndLine}{truncatedText}");
+                    builder.AppendLine(declaration.Source);
+                }
+                break;
+
+            case DocumentSymbolsResult documentSymbols:
+                AppendPair(builder, "Command", documentSymbols.Command);
+                AppendPair(builder, "File", documentSymbols.File);
+                AppendPair(builder, "Symbols", documentSymbols.TotalCount);
+                foreach (var item in documentSymbols.Symbols)
+                    builder.AppendLine($"{new string(' ', item.Depth * 2)}- {item.Symbol} [{item.Kind}, {item.Accessibility}] {item.StartLine}-{item.EndLine}");
+                break;
+
+            case CalleesResult callees:
+                AppendPair(builder, "Command", callees.Command);
+                AppendPair(builder, "Symbol", callees.FullyQualifiedName);
+                AppendPair(builder, "Callees", callees.TotalCount);
+                foreach (var callee in callees.Callees)
+                {
+                    var definition = callee.IsSource ? $"{callee.File}:{callee.Line}" : callee.ContainingAssembly;
+                    AppendItem(builder, $"{callee.Symbol} [{callee.Kind}] @ {definition} — called at line {string.Join(", ", callee.CallLines)}");
+                }
                 break;
 
             case SymbolSearchResult symbolSearch:
@@ -214,6 +252,9 @@ internal static class CliOutputWriter
                 builder.Append(JsonSerializer.Serialize(result, JsonOptions));
                 break;
         }
+
+        if (result.GetType().GetProperty("Truncated")?.GetValue(result) is true)
+            builder.AppendLine("(Results truncated by --max-results.)");
 
         return builder.ToString().TrimEnd();
     }

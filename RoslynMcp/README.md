@@ -12,7 +12,22 @@
 3. 如需確認目前狀態，可呼叫 `get_loaded_target`
 4. 完成後呼叫 `release_target` 釋放 workspace
 
-> 如果同一路徑已經載入，`load_target` 會直接重用目前 session；若你想強制重新載入，先呼叫 `release_target` 再重新 `load_target`。
+> 如果同一路徑已經載入，`load_target` 會直接重用目前 session；若要強制重新載入，傳入 `forceReload: true`。
+
+### 檔案變更自動同步
+
+每次查詢前，server 會比對已載入檔案的 timestamp / 大小（`WorkspaceFileSnapshot`）：
+
+- 既有 `.cs` / `.vb` 檔內容變更 → 以 `Solution.WithDocumentText` 增量更新。
+- 專案目錄下新增 / 刪除原始碼檔，或 `.sln(x)`、project 檔、`Directory.Build.*`、`Directory.Packages.props`、`global.json` 變更 → 自動完整 reload。
+- 同步結果可由 `get_loaded_target` 的 `lastSyncSummary` / `lastSyncedAtUtc` 查看。
+
+Agent 修改檔案後不需要手動重新載入。
+
+### 錯誤回報
+
+Tool 內的例外一律轉成 `McpException`，讓錯誤訊息（例如未載入 target、symbol 有歧義時的候選清單）能傳回 Agent。
+MCP SDK 只會轉送 `McpException` 的訊息，其他例外只會變成通用的「An error occurred invoking ...」。
 
 ---
 
@@ -45,7 +60,10 @@
 | `find_usages` | 找出 symbol 的 usages |
 | `find_implementations` | 找出 interface / abstract type / member 的實作 |
 | `find_overrides` | 找出 overrides / derived types |
-| `get_symbol_info` | 取得 symbol 詳細資訊 |
+| `get_symbol_info` | 取得 symbol 詳細資訊：signature、回傳型別、XML doc summary、各宣告的起訖行 |
+| `get_symbol_source` | 回傳 symbol 宣告的原始碼（含 XML doc comment）與起訖行；`maxLines` 預設 200 |
+| `get_document_symbols` | 檔案大綱：namespace / type / member、起訖行與巢狀深度 |
+| `find_callees` | 列出 method / property 內呼叫的 method 與 constructor（outgoing calls，僅 C#）；`sourceOnly` 可略過 framework API |
 | `search_symbols` | Wildcard 搜尋 symbol |
 | `list_members` | 列出 type / namespace 成員 |
 | `get_hierarchy` | 查詢 type hierarchy |
@@ -56,16 +74,23 @@
 | `find_unused` | 找出可能未使用的 symbol |
 | `analyze_complexity` | 進行 cyclomatic complexity 分析 |
 | `find_obsolete` | 找出 obsolete API usages |
-| `get_diagnostics` | 一次回傳 errors + warnings |
-| `run_analyzers` | 執行 compiler diagnostics 與 analyzers |
+| `get_diagnostics` | 依 `severity`（`error` / `warning` / `all`，預設 `error`）回傳 compiler diagnostics，可用 `file` 只檢查單一檔案、`project` 篩選專案，`includeAnalyzers` 預設關閉 |
+| `run_analyzers` | 執行 compiler diagnostics 與 analyzers，可用 `file` / `project` 縮小範圍 |
 
 大多數查詢工具都支援下列常見參數組合：
 
-- `symbol`
-- `file` + `line`
-- `filter`
-- `visibility`
-- `exclude`
+- `symbol`：簡單名稱、`Type.Member`、含參數 signature（`Type.Method(int, string)`）或 fully qualified name；有歧義時回傳錯誤並列出候選
+- `file` + `line`（+ `column`）：以位置選取 symbol
+- `filter`：symbol kind enum（`class` / `interface` / `struct` / `enum` / `delegate` / `method` / `property` / `field` / `event` / `namespace`）
+- `visibility`：`all` / `public` / `internal` / `private`
+- `exclude`：wildcard，比對完整路徑或檔名（例如 `*Tests*`、`*/obj/*`）
+- `maxResults`：清單上限，預設 `100`，`0` 表示不限；結果中的 `totalCount` 為完整數量、`truncated` 表示是否被截斷
+
+其他設計：
+
+- 所有 tool 皆標記 `ReadOnly` / `Idempotent` annotations，並支援 MCP cancellation。
+- `Program.cs` 透過 `ServerInstructions` 向 client 說明 workflow、symbol 寫法與結果上限。
+- 輸出路徑相對於 `get_loaded_target` 回報的 `targetDirectory`，行列皆為 1-based。
 
 ---
 
@@ -93,6 +118,10 @@
 
 - `dotnet build RoslynTools.slnx`
 - `dotnet test RoslynTools.slnx`
+- 端到端（stdio）驗證：先 `dotnet build RoslynMcp`，再執行
+  `uv run --no-project python -I scripts/mcp_e2e.py scripts/mcp_e2e.sample.json`。
+  腳本會啟動 `RoslynMcp/bin/Debug/net10.0/win-x64/roslyn-mcp.exe`、完成 initialize，依 JSON 情境逐步呼叫 tool 或寫入檔案（測試變更同步），
+  暫存檔放在 `TestResults/mcp-e2e/`（已被 `.gitignore` 排除）。情境格式見腳本開頭說明。
 
 `roslyn-mcp` 預設不註冊 console logger，避免干擾 stdio MCP client。
 

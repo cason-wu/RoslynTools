@@ -1,0 +1,17 @@
+[
+  {"name": "find_callers", "args": {"symbol": "Add"}, "limit": 300},
+  {"action": "write", "path": "Demo/Demo.csproj", "content": "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>\n"},
+  {"action": "write", "path": "Demo/Calculator.cs", "content": "namespace Demo;\n\npublic class Calculator\n{\n    /// <summary>Adds two integers.</summary>\n    public int Add(int a, int b) => a + b;\n\n    public double Add(double a, double b) => a + b;\n\n    public int Use() => Add(1, 2);\n}\n"},
+  {"name": "load_target", "args": {"targetPath": "{work}/Demo/Demo.csproj", "forceReload": true}, "limit": 400},
+  {"name": "get_symbol_info", "args": {"symbol": "Calculator.Add"}, "limit": 800},
+  {"name": "get_symbol_info", "args": {"symbol": "Calculator.Add(int, int)"}, "limit": 800},
+  {"name": "find_callers", "args": {"symbol": "Calculator.Add(int, int)"}, "limit": 400},
+  {"action": "write", "path": "Demo/Calculator.cs", "content": "namespace Demo;\n\npublic class Calculator\n{\n    /// <summary>Adds two integers.</summary>\n    public int Add(int a, int b) => a + b;\n\n    public double Add(double a, double b) => a + b;\n\n    public int Use() => Add(1, 2);\n\n    public int UseTwice() => Add(3, 4) + Add(5, 6);\n}\n"},
+  {"name": "find_callers", "args": {"symbol": "Calculator.Add(int, int)", "maxResults": 2}, "limit": 1200},
+  {"action": "write", "path": "Demo/Extra.cs", "content": "namespace Demo;\n\npublic class Extra\n{\n    public int Go() => new Calculator().Add(7, 8) + System.Math.Abs(-1);\n}\n"},
+  {"name": "find_callees", "args": {"symbol": "Extra.Go"}, "limit": 1200},
+  {"name": "get_document_symbols", "args": {"file": "Calculator.cs"}, "limit": 1500},
+  {"name": "get_symbol_source", "args": {"symbol": "Calculator.UseTwice"}, "limit": 600},
+  {"name": "get_diagnostics", "args": {"file": "Extra.cs", "severity": "all"}, "limit": 600},
+  {"name": "get_loaded_target", "args": {}, "limit": 800}
+]

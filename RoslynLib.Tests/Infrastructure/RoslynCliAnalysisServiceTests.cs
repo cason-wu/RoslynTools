@@ -267,6 +267,326 @@ public sealed class RoslynCliAnalysisServiceTests
         Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Id is "CS0612" or "CS0618");
     }
 
+    [Fact(DisplayName = "Ambiguous symbol name reports candidates instead of picking one")]
+    public async Task GetSymbolInfoAsync_AmbiguousOverloads_ThrowsWithCandidates()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "AmbiguousProject",
+            """
+            namespace Demo;
+
+            public class Calculator
+            {
+                public int Add(int left, int right) => left + right;
+                public double Add(double left, double right) => left + right;
+            }
+            """);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => _sut.GetSymbolInfoAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Calculator.Add" },
+            TestContext.Current.CancellationToken));
+
+        Assert.Contains("ambiguous", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Demo.Calculator.Add(int, int)", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Demo.Calculator.Add(double, double)", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Overload signature resolves a single symbol")]
+    public async Task GetSymbolInfoAsync_OverloadSignature_ResolvesSymbol()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "SignatureProject",
+            """
+            namespace Demo;
+
+            public class Calculator
+            {
+                public int Add(int left, int right) => left + right;
+                public double Add(double left, double right) => left + right;
+            }
+            """);
+
+        var result = await _sut.GetSymbolInfoAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Calculator.Add(double, double)" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Demo.Calculator.Add(double, double)", result.FullyQualifiedName);
+    }
+
+    [Fact(DisplayName = "Type.Method resolves generic methods without type parameters")]
+    public async Task GetSymbolInfoAsync_GenericMethodWithoutTypeParameters_ResolvesSymbol()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "GenericProject",
+            """
+            namespace Demo;
+
+            public class Runner
+            {
+                public T Run<T>(T value) => value;
+            }
+            """);
+
+        var result = await _sut.GetSymbolInfoAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Runner.Run" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Demo.Runner.Run<T>(T)", result.FullyQualifiedName);
+    }
+
+    [Fact(DisplayName = "Symbols are found when their namespace also exists in a referenced project")]
+    public async Task SearchSymbolsAsync_NamespaceSharedWithReferencedProject_FindsSymbols()
+    {
+        using var workspaceTarget = CreateReferencingWorkspaceTarget(
+            """
+            namespace Demo.Core;
+
+            public class OrderService { }
+            """,
+            """
+            namespace Demo.Core.Tests;
+
+            public class OrderServiceTests { }
+            """);
+
+        var result = await _sut.SearchSymbolsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "*Tests", Filter = "class" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(result.Symbols, static item => item.FullyQualifiedName == "Demo.Core.Tests.OrderServiceTests");
+    }
+
+    [Fact(DisplayName = "MaxResults truncates items but keeps the full total count")]
+    public async Task SearchSymbolsAsync_MaxResults_TruncatesItems()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "LimitProject",
+            """
+            namespace Demo;
+
+            public class AlphaService { }
+            public class BetaService { }
+            public class GammaService { }
+            """);
+
+        var result = await _sut.SearchSymbolsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "*Service", MaxResults = 2 },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal(2, result.Symbols.Count);
+        Assert.True(result.Truncated);
+    }
+
+    [Fact(DisplayName = "Column selects the symbol at that position on a line")]
+    public async Task GetSymbolInfoAsync_FileLineColumn_ResolvesSymbolAtColumn()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "ColumnProject",
+            """
+            namespace Demo;
+
+            public class Left { } public class Right { }
+            """);
+        var file = workspaceTarget.PrimaryDocument!.FilePath!;
+
+        var result = await _sut.GetSymbolInfoAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { File = file, Line = 3, Column = 36 },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Demo.Right", result.FullyQualifiedName);
+    }
+
+    [Fact(DisplayName = "Diagnostics query filters by severity and file")]
+    public async Task QueryDiagnosticsAsync_SeverityAndFile_ReturnsMatchingDiagnostics()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget(
+            "DiagnosticsProject",
+            """
+            namespace Demo;
+
+            public class Broken
+            {
+                public int Run()
+                {
+                    int unused;
+                    return MissingMethod();
+                }
+            }
+            """);
+        var file = workspaceTarget.PrimaryDocument!.FilePath!;
+
+        var errors = await _sut.QueryDiagnosticsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { File = file },
+            "error",
+            includeAnalyzers: false,
+            TestContext.Current.CancellationToken);
+        var all = await _sut.QueryDiagnosticsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions(),
+            "all",
+            includeAnalyzers: false,
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(errors.Diagnostics, static item => item.Id == "CS0103");
+        Assert.All(errors.Diagnostics, static item => Assert.Equal("Error", item.Severity));
+        Assert.Contains(all.Diagnostics, static item => item.Id == "CS0168");
+        Assert.Equal("Error", all.Diagnostics[0].Severity);
+    }
+
+    private const string ReadingSource = """
+        namespace Demo;
+
+        public class Pricing
+        {
+            private readonly int _rate = 2;
+
+            /// <summary>Returns the price for <paramref name="count"/> items using <see cref="Helper"/>.</summary>
+            public int Price(int count)
+            {
+                var helper = new Helper();
+                return helper.Scale(count) * _rate + System.Math.Abs(count);
+            }
+        }
+
+        public class Helper
+        {
+            public int Scale(int value) => value * 10;
+        }
+        """;
+
+    [Fact(DisplayName = "Symbol info includes signature, return type, summary, and declaration range")]
+    public async Task GetSymbolInfoAsync_Method_ReturnsSignatureAndSummary()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget("InfoDetailsProject", ReadingSource);
+
+        var result = await _sut.GetSymbolInfoAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Pricing.Price" },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("public int Pricing.Price(int count)", result.Signature);
+        Assert.Equal("int", result.ReturnType);
+        Assert.Equal("Returns the price for count items using Demo.Helper.", result.Summary);
+        var declaration = Assert.Single(result.Declarations);
+        Assert.Equal(7, declaration.StartLine);
+        Assert.Equal(12, declaration.EndLine);
+    }
+
+    [Fact(DisplayName = "Symbol source returns the declaration text and honors max lines")]
+    public async Task GetSymbolSourceAsync_Method_ReturnsDeclarationSource()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget("SourceProject", ReadingSource);
+
+        var full = await _sut.GetSymbolSourceAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Pricing.Price" },
+            maxLines: null,
+            TestContext.Current.CancellationToken);
+        var limited = await _sut.GetSymbolSourceAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Pricing.Price" },
+            maxLines: 2,
+            TestContext.Current.CancellationToken);
+
+        var declaration = Assert.Single(full.Declarations);
+        Assert.StartsWith("    /// <summary>", declaration.Source, StringComparison.Ordinal);
+        Assert.EndsWith("    }", declaration.Source, StringComparison.Ordinal);
+        Assert.False(declaration.Truncated);
+
+        var limitedDeclaration = Assert.Single(limited.Declarations);
+        Assert.True(limitedDeclaration.Truncated);
+        Assert.Equal(2, limitedDeclaration.Source.Split('\n').Length);
+        Assert.Equal(12, limitedDeclaration.EndLine);
+    }
+
+    [Fact(DisplayName = "Document symbols list types and members with nesting depth")]
+    public async Task GetDocumentSymbolsAsync_File_ReturnsOutline()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget("OutlineProject", ReadingSource);
+
+        var result = await _sut.GetDocumentSymbolsAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { File = workspaceTarget.PrimaryDocument!.FilePath },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            ["Demo", "Pricing", "_rate", "Price(int)", "Helper", "Scale(int)"],
+            result.Symbols.Select(static item => item.Symbol));
+        Assert.Equal([0, 1, 2, 2, 1, 2], result.Symbols.Select(static item => item.Depth));
+        Assert.DoesNotContain(result.Symbols, static item => item.Symbol == "helper");
+    }
+
+    [Fact(DisplayName = "Callees list methods and constructors called from a method body")]
+    public async Task FindCalleesAsync_Method_ReturnsOutgoingCalls()
+    {
+        using var workspaceTarget = CreateWorkspaceTarget("CalleesProject", ReadingSource);
+
+        var all = await _sut.FindCalleesAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Pricing.Price" },
+            sourceOnly: false,
+            TestContext.Current.CancellationToken);
+        var sourceOnly = await _sut.FindCalleesAsync(
+            workspaceTarget,
+            new RoslynCliQueryOptions { Symbol = "Pricing.Price" },
+            sourceOnly: true,
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(all.Callees, static item => item.Symbol == "Demo.Helper.Scale(int)" && item.IsSource && item.CallLines.SequenceEqual([11]));
+        Assert.Contains(all.Callees, static item => item.Kind == "Constructor" && item.ContainingType == "Demo.Helper");
+        Assert.Contains(all.Callees, static item => item.Symbol.StartsWith("System.Math.Abs", StringComparison.Ordinal) && !item.IsSource);
+        Assert.DoesNotContain(sourceOnly.Callees, static item => !item.IsSource);
+    }
+
+    private static LoadedWorkspaceTarget CreateReferencingWorkspaceTarget(string librarySource, string testSource)
+    {
+        var workspace = new AdhocWorkspace();
+        var libraryId = ProjectId.CreateNewId("Library");
+        var testId = ProjectId.CreateNewId("Library.Tests");
+        var directory = Path.GetTempPath();
+
+        var solution = workspace.CurrentSolution
+            .AddProject(ProjectInfo.Create(
+                libraryId,
+                VersionStamp.Default,
+                "Library",
+                "Library",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(directory, "Library.csproj"),
+                metadataReferences: DefaultReferences,
+                compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)))
+            .AddProject(ProjectInfo.Create(
+                testId,
+                VersionStamp.Default,
+                "Library.Tests",
+                "Library.Tests",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(directory, "Library.Tests.csproj"),
+                metadataReferences: DefaultReferences,
+                projectReferences: [new ProjectReference(libraryId)],
+                compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)));
+
+        solution = solution
+            .AddDocument(DocumentId.CreateNewId(libraryId), "Library.cs", SourceText.From(librarySource), filePath: Path.Combine(directory, "Library.cs"))
+            .AddDocument(DocumentId.CreateNewId(testId), "LibraryTests.cs", SourceText.From(testSource), filePath: Path.Combine(directory, "LibraryTests.cs"));
+
+        return new LoadedWorkspaceTarget(
+            workspace,
+            Path.Combine(directory, "Library.slnx"),
+            WorkspaceTargetKind.Solution,
+            solution,
+            solution.GetProject(libraryId),
+            null);
+    }
+
     private static IReadOnlyList<MetadataReference> BuildDefaultReferences()
     {
         var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty;

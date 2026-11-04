@@ -50,13 +50,18 @@ roslyn-cli <target> <group> <command> [options]
 | 選項 | 說明 |
 |------|------|
 | `--output <format>` | `json` / `text` / `mcp`（預設 `json`） |
-| `--symbol <name>` | 指定 Symbol 名稱或 fully qualified name |
+| `--symbol <name>` | 指定 Symbol 名稱、`Type.Member`、含參數的 signature 或 fully qualified name（歧義時報錯並列出候選） |
 | `--filter <kind>` | `class` / `method` / `property` / `event` / `field` / `interface` / `struct` / `enum` / `delegate` / `namespace` |
 | `--visibility <level>` | `public` / `internal` / `private` / `all` |
 | `--exclude <pattern>` | 排除 glob-like 路徑（可多次使用） |
 | `--line <number>` | 指定行號（搭配 `--file` 定位 Symbol） |
-| `--file <path>` | 指定檔案路徑 |
+| `--file <path>` | 指定檔案路徑；`diag` 指令可用來只檢查單一檔案 |
+| `--column <number>` | 指定欄位（搭配 `--file` / `--line`） |
+| `--project <pattern>` | `diag` 指令只檢查名稱符合 wildcard 的專案 |
+| `--max-results <number>` | 最多回傳 N 筆（`TotalCount` 為完整數量、`Truncated` 表示是否截斷） |
 | `--threshold <number>` | `dead complexity` 門檻，預設 `10` |
+| `--max-lines <number>` | `sym source` 每個宣告最多回傳的行數 |
+| `--source-only` | `refs callees` 只列出 target 原始碼中的 callee |
 
 ---
 
@@ -67,6 +72,7 @@ roslyn-cli <target> <group> <command> [options]
 | 子指令 | 說明 |
 |--------|------|
 | `callers` | 找出所有呼叫指定 method 的地方 |
+| `callees` | 列出 method / property 內呼叫的 method 與 constructor（outgoing calls，僅 C#），可加 `--source-only` |
 | `usages` | 找出 Symbol 的所有使用位置 |
 | `impls` | 找出 interface / abstract type / member 的實作 |
 | `overrides` | 找出 override 或衍生型別關係 |
@@ -84,10 +90,12 @@ roslyn-cli <target> <group> <command> [options]
 
 | 子指令 | 說明 |
 |--------|------|
-| `info` | 取得 Symbol 詳情 |
+| `info` | 取得 Symbol 詳情（含 signature、回傳型別、XML doc summary、宣告行範圍） |
 | `search` | Wildcard 搜尋 Symbol |
 | `list` | 列出 type / namespace 的成員 |
 | `hierarchy` | 顯示繼承與介面層級 |
+| `source` | 回傳 Symbol 宣告的原始碼（含 XML doc comment）與起訖行，可加 `--max-lines` |
+| `outline` | 以 `--file` 指定檔案，列出 namespace / type / member 的大綱、起訖行與巢狀深度 |
 
 ### `dead` — Dead Code 偵測
 

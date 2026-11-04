@@ -61,8 +61,9 @@ public sealed partial class RoslynCliAnalysisService
             options.Symbol ?? RoslynSymbolHelper.FormatSymbolDisplayName(symbol),
             RoslynSymbolHelper.GetKind(symbol).ToString(),
             symbol.ToDisplayString(),
-            ordered,
-            ordered.Count);
+            Limit(ordered, options),
+            ordered.Count,
+            IsTruncated(ordered, options));
     }
 
     public async Task<UsagesResult> FindUsagesAsync(
@@ -117,8 +118,9 @@ public sealed partial class RoslynCliAnalysisService
             options.Symbol ?? RoslynSymbolHelper.FormatSymbolDisplayName(symbol),
             RoslynSymbolHelper.GetKind(symbol).ToString(),
             symbol.ToDisplayString(),
-            ordered,
-            ordered.Count);
+            Limit(ordered, options),
+            ordered.Count,
+            IsTruncated(ordered, options));
     }
 
     public async Task<ImplementationsResult> FindImplementationsAsync(
@@ -172,8 +174,9 @@ public sealed partial class RoslynCliAnalysisService
             options.Symbol ?? RoslynSymbolHelper.FormatSymbolDisplayName(symbol),
             RoslynSymbolHelper.GetKind(symbol).ToString(),
             symbol.ToDisplayString(),
-            results,
-            results.Count);
+            Limit(results, options),
+            results.Count,
+            IsTruncated(results, options));
     }
 
     public async Task<OverridesResult> FindOverridesAsync(
@@ -231,8 +234,9 @@ public sealed partial class RoslynCliAnalysisService
             options.Symbol ?? RoslynSymbolHelper.FormatSymbolDisplayName(symbol),
             RoslynSymbolHelper.GetKind(symbol).ToString(),
             symbol.ToDisplayString(),
-            results,
-            results.Count);
+            Limit(results, options),
+            results.Count,
+            IsTruncated(results, options));
     }
 
     public Task<DependencyGraphResult> AnalyzeDependencyGraphAsync(
@@ -370,7 +374,7 @@ public sealed partial class RoslynCliAnalysisService
             .ToList()
             .AsReadOnly();
 
-        return new NamespaceDependenciesResult("deps namespaces", results, results.Count);
+        return new NamespaceDependenciesResult("deps namespaces", Limit(results, options), results.Count, IsTruncated(results, options));
     }
 
     public async Task<SymbolInfoResult> GetSymbolInfoAsync(
@@ -409,7 +413,11 @@ public sealed partial class RoslynCliAnalysisService
                 location.LineNumber,
                 1,
                 string.Empty),
-            members);
+            members,
+            symbol.ToDisplayString(SignatureFormat),
+            GetReturnTypeName(symbol),
+            ExtractDocumentationSummary(symbol, cancellationToken),
+            await GetDeclarationRangesAsync(symbol, workspaceTarget, cancellationToken).ConfigureAwait(false));
     }
 
     public async Task<SymbolSearchResult> SearchSymbolsAsync(
@@ -449,7 +457,7 @@ public sealed partial class RoslynCliAnalysisService
             .ToList()
             .AsReadOnly();
 
-        return new SymbolSearchResult("sym search", pattern, results, results.Count);
+        return new SymbolSearchResult("sym search", pattern, Limit(results, options), results.Count, IsTruncated(results, options));
     }
 
     public async Task<SymbolListResult> ListMembersAsync(
@@ -493,8 +501,9 @@ public sealed partial class RoslynCliAnalysisService
             "sym list",
             options.Symbol ?? RoslynSymbolHelper.FormatSymbolDisplayName(symbol),
             symbol.ToDisplayString(),
-            results,
-            results.Count);
+            Limit(results, options),
+            results.Count,
+            IsTruncated(results, options));
     }
 
     public async Task<SymbolHierarchyResult> GetHierarchyAsync(
@@ -606,7 +615,7 @@ public sealed partial class RoslynCliAnalysisService
             .ToList()
             .AsReadOnly();
 
-        return new UnusedSymbolsResult("dead unused", ordered, ordered.Count);
+        return new UnusedSymbolsResult("dead unused", Limit(ordered, options), ordered.Count, IsTruncated(ordered, options));
     }
 
     public async Task<ComplexityAnalysisResult> AnalyzeComplexityAsync(
@@ -676,7 +685,7 @@ public sealed partial class RoslynCliAnalysisService
             .ToList()
             .AsReadOnly();
 
-        return new ComplexityAnalysisResult("dead complexity", threshold, ordered, ordered.Count);
+        return new ComplexityAnalysisResult("dead complexity", threshold, Limit(ordered, options), ordered.Count, IsTruncated(ordered, options));
     }
 
     public async Task<ObsoleteUsagesResult> FindObsoleteUsagesAsync(
@@ -684,8 +693,9 @@ public sealed partial class RoslynCliAnalysisService
         RoslynCliQueryOptions options,
         CancellationToken cancellationToken = default)
     {
-        var diagnostics = await CollectCompilationDiagnosticsAsync(workspaceTarget, cancellationToken).ConfigureAwait(false);
+        var diagnostics = await CollectDiagnosticsAsync(workspaceTarget, options, includeAnalyzers: false, cancellationToken).ConfigureAwait(false);
         var obsoleteDiagnostics = diagnostics
+            .Select(static item => item.Diagnostic)
             .Where(static diagnostic => diagnostic.Id is "CS0612" or "CS0618" or "CS0619")
             .Where(diagnostic => !RoslynSymbolHelper.IsPathExcluded(diagnostic.Location.GetLineSpan().Path, options.Excludes))
             .Select(diagnostic =>
@@ -704,42 +714,57 @@ public sealed partial class RoslynCliAnalysisService
             .ToList()
             .AsReadOnly();
 
-        return new ObsoleteUsagesResult("dead obsolete", obsoleteDiagnostics, obsoleteDiagnostics.Count);
+        return new ObsoleteUsagesResult("dead obsolete", Limit(obsoleteDiagnostics, options), obsoleteDiagnostics.Count, IsTruncated(obsoleteDiagnostics, options));
     }
 
-    public async Task<DiagnosticsResult> GetErrorsAsync(
+    public Task<DiagnosticsResult> GetErrorsAsync(
         LoadedWorkspaceTarget workspaceTarget,
         RoslynCliQueryOptions options,
         CancellationToken cancellationToken = default)
-        => await GetDiagnosticsAsync(
-                workspaceTarget,
-                options,
-                DiagnosticSeverity.Error,
-                "diag errors",
-                cancellationToken)
-            .ConfigureAwait(false);
+        => GetDiagnosticsAsync(
+            workspaceTarget,
+            options,
+            static severity => severity == DiagnosticSeverity.Error,
+            includeAnalyzers: true,
+            "diag errors",
+            cancellationToken);
 
-    public async Task<DiagnosticsResult> GetWarningsAsync(
+    public Task<DiagnosticsResult> GetWarningsAsync(
         LoadedWorkspaceTarget workspaceTarget,
         RoslynCliQueryOptions options,
         CancellationToken cancellationToken = default)
-        => await GetDiagnosticsAsync(
-                workspaceTarget,
-                options,
-                DiagnosticSeverity.Warning,
-                "diag warnings",
-                cancellationToken)
-            .ConfigureAwait(false);
+        => GetDiagnosticsAsync(
+            workspaceTarget,
+            options,
+            static severity => severity == DiagnosticSeverity.Warning,
+            includeAnalyzers: true,
+            "diag warnings",
+            cancellationToken);
 
-    public async Task<DiagnosticsResult> RunAnalyzersAsync(
+    public Task<DiagnosticsResult> RunAnalyzersAsync(
         LoadedWorkspaceTarget workspaceTarget,
         RoslynCliQueryOptions options,
         CancellationToken cancellationToken = default)
-        => await GetDiagnosticsAsync(
-                workspaceTarget,
-                options,
-                severityFilter: null,
-                command: "diag analyze",
-                cancellationToken)
-            .ConfigureAwait(false);
+        => GetDiagnosticsAsync(
+            workspaceTarget,
+            options,
+            static severity => severity != DiagnosticSeverity.Hidden,
+            includeAnalyzers: true,
+            "diag analyze",
+            cancellationToken);
+
+    // severity: error | warning | all. Analyzers are opt-in because they are much slower than compiler diagnostics.
+    public Task<DiagnosticsResult> QueryDiagnosticsAsync(
+        LoadedWorkspaceTarget workspaceTarget,
+        RoslynCliQueryOptions options,
+        string? severity,
+        bool includeAnalyzers,
+        CancellationToken cancellationToken = default)
+        => GetDiagnosticsAsync(
+            workspaceTarget,
+            options,
+            ParseSeverityFilter(severity),
+            includeAnalyzers,
+            "diag query",
+            cancellationToken);
 }

@@ -52,7 +52,8 @@ public sealed class RoslynWorkspaceLoader
                 WorkspaceTargetKind.Solution,
                 solution,
                 solution.Projects.FirstOrDefault(),
-                null);
+                null,
+                CollectLoadDiagnostics(workspace));
         }
         catch
         {
@@ -79,7 +80,8 @@ public sealed class RoslynWorkspaceLoader
                 WorkspaceTargetKind.Project,
                 project.Solution,
                 project,
-                null);
+                null,
+                CollectLoadDiagnostics(workspace));
         }
         catch
         {
@@ -137,6 +139,15 @@ public sealed class RoslynWorkspaceLoader
             workspace.Dispose();
             throw;
         }
+    }
+
+    private static IReadOnlyList<string> CollectLoadDiagnostics(MSBuildWorkspace workspace)
+    {
+        return workspace.Diagnostics
+            .Select(static diagnostic => $"{diagnostic.Kind}: {diagnostic.Message}")
+            .Distinct(StringComparer.Ordinal)
+            .ToList()
+            .AsReadOnly();
     }
 
     private static void EnsureMSBuildRegistered()

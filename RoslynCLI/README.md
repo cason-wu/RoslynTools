@@ -7,9 +7,9 @@
 
 ## 功能特色
 
-- 🔍 **Reference queries** — callers / usages / implementations / overrides
+- 🔍 **Reference queries** — callers / callees / usages / implementations / overrides
 - 🧭 **Dependency analysis** — project graph / cycles / NuGet / namespace dependencies
-- 🏷️ **Symbol inspection** — info / search / list / hierarchy
+- 🏷️ **Symbol inspection** — info / search / list / hierarchy / source / outline
 - 🧹 **Dead code analysis** — unused / complexity / obsolete usages
 - 📋 **Diagnostics** — compiler errors / warnings / analyzer diagnostics
 - 🧩 **AI-friendly output** — `--output mcp` 會輸出 MCP tool result 風格的 JSON，但**不會啟動 MCP server**
@@ -57,13 +57,18 @@ roslyn-cli help
 | 選項 | 說明 |
 |---|---|
 | `--output <format>` | `json` / `text` / `mcp`，預設 `json` |
-| `--symbol <name>` | Symbol 名稱或 fully qualified name |
+| `--symbol <name>` | Symbol 名稱、`Type.Member`、含參數的 signature（如 `Type.Method(int)`）或 fully qualified name；名稱有歧義時會報錯並列出候選 |
 | `--filter <kind>` | `class` / `method` / `property` / `event` / `field` / `interface` / `struct` / `enum` / `delegate` / `namespace` |
 | `--visibility <level>` | `public` / `internal` / `private` / `all`，預設 `all` |
 | `--exclude <pattern>` | 排除 glob-like 路徑，可重複使用 |
 | `--file <path>` | 指定檔案，搭配 `--line` 以位置定位 symbol |
 | `--line <number>` | 指定 1-based 行號，搭配 `--file` 使用 |
+| `--column <number>` | 指定 1-based 欄位，搭配 `--file` / `--line`，用於同一行有多個 symbol 時 |
+| `--project <pattern>` | `diag` 指令只檢查名稱符合 wildcard 的專案 |
+| `--max-results <number>` | 最多回傳 N 筆；`TotalCount` 仍為完整數量，`Truncated` 表示是否截斷。預設不限 |
 | `--threshold <number>` | `dead complexity` 門檻，預設 `10` |
+| `--max-lines <number>` | `sym source` 每個宣告最多回傳的行數，預設不限 |
+| `--source-only` | `refs callees` 只列出宣告在 target 原始碼中的 callee |
 
 ---
 
@@ -103,6 +108,7 @@ roslyn-cli sym info MyApp.sln --symbol "OrderService" --output mcp
 roslyn-cli
 ├── refs
 │   ├── callers
+│   ├── callees
 │   ├── usages
 │   ├── impls
 │   └── overrides
@@ -115,7 +121,9 @@ roslyn-cli
 │   ├── info
 │   ├── search
 │   ├── list
-│   └── hierarchy
+│   ├── hierarchy
+│   ├── source
+│   └── outline
 ├── dead
 │   ├── unused
 │   ├── complexity

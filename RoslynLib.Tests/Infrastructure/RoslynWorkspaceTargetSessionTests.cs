@@ -107,6 +107,64 @@ public sealed class RoslynWorkspaceTargetSessionTests
         Assert.Contains("load_target", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact(DisplayName = "Edits on disk are synchronized before the next query")]
+    public async Task RunWithLoadedTargetAsync_FileEdited_UsesUpdatedText()
+    {
+        using var sourceFile = new TemporarySourceFile(
+            "EditedSample.cs",
+            """
+            namespace Demo;
+
+            public class EditedSample { }
+            """);
+        var loader = new RoslynWorkspaceLoader();
+        var analysisService = new RoslynCliAnalysisService();
+        using var session = new RoslynWorkspaceTargetSession(loader);
+        await session.LoadTargetAsync(sourceFile.FilePath, TestContext.Current.CancellationToken);
+
+        await File.WriteAllTextAsync(
+            sourceFile.FilePath,
+            """
+            namespace Demo;
+
+            public class EditedSample { }
+
+            public class AddedAfterLoad { }
+            """,
+            TestContext.Current.CancellationToken);
+
+        var result = await session.RunWithLoadedTargetAsync(
+            (loadedTarget, cancellationToken) => analysisService.SearchSymbolsAsync(
+                loadedTarget,
+                new RoslynCliQueryOptions { Symbol = "AddedAfterLoad" },
+                cancellationToken),
+            TestContext.Current.CancellationToken);
+        var status = await session.GetStatusAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Contains("Updated 1 changed document", status.LastSyncSummary, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Force reload rebuilds the same target")]
+    public async Task LoadTargetAsync_ForceReload_ReloadsTarget()
+    {
+        using var sourceFile = new TemporarySourceFile(
+            "ReloadSample.cs",
+            """
+            namespace Demo;
+
+            public class ReloadSample { }
+            """);
+        var loader = new RoslynWorkspaceLoader();
+        using var session = new RoslynWorkspaceTargetSession(loader);
+
+        await session.LoadTargetAsync(sourceFile.FilePath, TestContext.Current.CancellationToken);
+        var reloaded = await session.LoadTargetAsync(sourceFile.FilePath, forceReload: true, TestContext.Current.CancellationToken);
+
+        Assert.True(reloaded.IsLoaded);
+        Assert.Contains("reloaded from disk", reloaded.Message, StringComparison.Ordinal);
+    }
+
     private sealed class TemporarySourceFile : IDisposable
     {
         private readonly string _directoryPath;

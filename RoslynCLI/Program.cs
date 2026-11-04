@@ -57,6 +57,7 @@ internal static class Program
             ("refs", "callers") => await AnalysisService.FindCallersAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("refs", "usages") => await AnalysisService.FindUsagesAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("refs", "impls") => await AnalysisService.FindImplementationsAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
+            ("refs", "callees") => await AnalysisService.FindCalleesAsync(workspaceTarget, arguments.QueryOptions, arguments.SourceOnly).ConfigureAwait(false),
             ("refs", "overrides") => await AnalysisService.FindOverridesAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("deps", "graph") => await AnalysisService.AnalyzeDependencyGraphAsync(workspaceTarget).ConfigureAwait(false),
             ("deps", "cycles") => await AnalysisService.FindDependencyCyclesAsync(workspaceTarget).ConfigureAwait(false),
@@ -65,6 +66,8 @@ internal static class Program
             ("sym", "info") => await AnalysisService.GetSymbolInfoAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("sym", "search") => await AnalysisService.SearchSymbolsAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("sym", "list") => await AnalysisService.ListMembersAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
+            ("sym", "source") => await AnalysisService.GetSymbolSourceAsync(workspaceTarget, arguments.QueryOptions, arguments.MaxLines).ConfigureAwait(false),
+            ("sym", "outline") => await AnalysisService.GetDocumentSymbolsAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("sym", "hierarchy") => await AnalysisService.GetHierarchyAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("dead", "unused") => await AnalysisService.FindUnusedSymbolsAsync(workspaceTarget, arguments.QueryOptions).ConfigureAwait(false),
             ("dead", "complexity") => await AnalysisService.AnalyzeComplexityAsync(workspaceTarget, arguments.Threshold ?? 10, arguments.QueryOptions).ConfigureAwait(false),
@@ -86,7 +89,12 @@ internal static class Program
         string visibility = "all";
         string? file = null;
         int? line = null;
+        int? column = null;
+        string? project = null;
+        int? maxResults = null;
         int? threshold = null;
+        int? maxLines = null;
+        var sourceOnly = false;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -120,6 +128,21 @@ internal static class Program
                 case "--line":
                     line = int.Parse(ReadNextValue(args, ref index, token));
                     break;
+                case "--column":
+                    column = int.Parse(ReadNextValue(args, ref index, token));
+                    break;
+                case "--project":
+                    project = ReadNextValue(args, ref index, token);
+                    break;
+                case "--max-results":
+                    maxResults = int.Parse(ReadNextValue(args, ref index, token));
+                    break;
+                case "--max-lines":
+                    maxLines = int.Parse(ReadNextValue(args, ref index, token));
+                    break;
+                case "--source-only":
+                    sourceOnly = true;
+                    break;
                 case "--threshold":
                     threshold = int.Parse(ReadNextValue(args, ref index, token));
                     break;
@@ -139,6 +162,8 @@ internal static class Program
             positionals[2],
             output,
             threshold,
+            maxLines,
+            sourceOnly,
             new RoslynCliQueryOptions
             {
                 Symbol = symbol,
@@ -147,6 +172,9 @@ internal static class Program
                 Excludes = excludes.AsReadOnly(),
                 File = file,
                 Line = line,
+                Column = column,
+                Project = project,
+                MaxResults = maxResults,
             });
     }
 
@@ -224,5 +252,7 @@ internal static class Program
         string Target,
         string Output,
         int? Threshold,
+        int? MaxLines,
+        bool SourceOnly,
         RoslynCliQueryOptions QueryOptions);
 }

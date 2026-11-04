@@ -12,9 +12,9 @@ internal static class CliHelpText
               roslyn-cli <target> <group> <command> [options]
 
             Groups and commands
-              refs callers|usages|impls|overrides
+              refs callers|callees|usages|impls|overrides
               deps graph|cycles|nuget|namespaces
-              sym  info|search|list|hierarchy
+              sym  info|search|list|hierarchy|source|outline
               dead unused|complexity|obsolete
               diag errors|warnings|analyze
 
@@ -26,13 +26,21 @@ internal static class CliHelpText
               --exclude <pattern>       Exclude glob-like path pattern (repeatable)
               --file <path>             Resolve symbol by file
               --line <number>           Resolve symbol by 1-based line number
+              --column <number>         Optional 1-based column used with --file/--line
+              --project <pattern>       Limit diag commands to matching project names (wildcard)
+              --max-results <number>    Return at most N items (TotalCount keeps the full count)
               --threshold <number>      Complexity threshold for dead complexity (default: 10)
+              --max-lines <number>      Max lines per declaration for sym source (default: no limit)
+              --source-only             refs callees: only callees declared in the loaded target
               --help, -h                Show this help text
 
             Examples
               roslyn-cli refs callers MyApp.sln --symbol "OrderService.CalculateTotal"
               roslyn-cli MyApp.sln sym search --symbol "*Service" --filter class --output text
               roslyn-cli diag errors MyApp.slnx --output json
+              roslyn-cli diag errors MyApp.slnx --file src/OrderService.cs
+              roslyn-cli sym source MyApp.slnx --symbol "OrderService.CalculateTotal" --output text
+              roslyn-cli sym outline MyApp.slnx --file src/OrderService.cs --output text
             """;
     }
 }
