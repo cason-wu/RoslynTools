@@ -24,7 +24,7 @@ dotnet run --project RoslynMcp
 
 # MCP 端到端（stdio）驗證：啟動 build 出來的 roslyn-mcp.exe，依 JSON 情境呼叫 tool / 寫檔
 dotnet build RoslynMcp
-uv run --no-project python -I scripts/mcp_e2e.py scripts/mcp_e2e.sample.json
+uv run --no-project python -I agents/scripts/mcp_e2e.py agents/scripts/mcp_e2e.sample.json
 ```
 
 - 全部專案 target `net10.0`（`RoslynTree` 為 `net10.0-windows` WPF，只能在 Windows 建置）。
